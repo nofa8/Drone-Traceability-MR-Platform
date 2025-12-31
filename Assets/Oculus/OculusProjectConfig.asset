@@ -13,10 +13,10 @@ MonoBehaviour:
   m_Name: OculusProjectConfig
   m_EditorClassIdentifier: Oculus.VR.Editor::OVRProjectConfig
   targetDeviceTypes: 02000000030000000400000005000000
-  allowOptional3DofHeadTracking: 0
+  allowOptional3DofHeadTracking: 1
   handTrackingSupport: 1
-  handTrackingFrequency: 0
-  handTrackingVersion: 0
+  handTrackingFrequency: 1
+  handTrackingVersion: 2
   anchorSupport: 1
   sharedAnchorSupport: 0
   renderModelSupport: 0
@@ -41,7 +41,7 @@ MonoBehaviour:
   requiresSystemKeyboard: 0
   experimentalFeaturesEnabled: 0
   insightPassthroughEnabled: 0
-  _insightPassthroughSupport: 1
+  _insightPassthroughSupport: 2
   _processorFavor: 0
   systemSplashScreen: {fileID: 0}
   systemSplashScreenType: 0
