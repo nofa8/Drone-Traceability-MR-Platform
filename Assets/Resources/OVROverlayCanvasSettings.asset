@@ -15,5 +15,5 @@ MonoBehaviour:
   _transparentImposterShader: {fileID: 4800000, guid: c64e6f0cc900d3f45ab52710eae7416f, type: 3}
   _opaqueImposterShader: {fileID: 4800000, guid: d8e39106449b12147968b744f7b25296, type: 3}
   MaxSimultaneousCanvases: 1
-  CanvasRenderLayer: 3
+  CanvasRenderLayer: 0
   CanvasLayer: 3
