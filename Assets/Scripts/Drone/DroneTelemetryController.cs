@@ -45,7 +45,7 @@ public class DroneTelemetryController : MonoBehaviour
         dataSource.Connect();
     }
 
-    void UpdateVisuals(DroneTelemetryData data)
+    public void UpdateVisuals(DroneTelemetryData data)
     {
         // --- UI Updates ---
         // Calculate 2D speed magnitude

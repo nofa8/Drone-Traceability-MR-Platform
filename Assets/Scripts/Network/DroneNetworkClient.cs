@@ -68,16 +68,18 @@ public class DroneNetworkClient : MonoBehaviour
 
     void ProcessMessage(string json)
     {
-        // Based on app.js, the broker sends the raw message object
-        try 
+        // 1. Parse the JSON into your Telemetry Model
+        DroneTelemetryData data = JsonUtility.FromJson<DroneTelemetryData>(json);
+
+        // 2. Send it to the Fleet Manager on the Main Thread
+        // (Using MainThreadDispatcher because WebSockets run in background)
+        MainThreadDispatcher.Enqueue(() => 
         {
-            DroneTelemetryData data = JsonUtility.FromJson<DroneTelemetryData>(json);
-            OnTelemetryReceived?.Invoke(data);
-        }
-        catch (Exception e) 
-        {
-            // Handle parsing errors (sometimes handshake messages aren't telemetry)
-        }
+            if (FleetUIManager.Instance != null)
+            {
+                FleetUIManager.Instance.HandleLiveUpdate(data);
+            }
+        });
     }
 
     private void OnDestroy()
