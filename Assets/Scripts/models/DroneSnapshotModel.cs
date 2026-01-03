@@ -1,27 +1,59 @@
 using System;
-using System.Collections.Generic;
-using UnityEngine;
-
-// --- REST API MODELS (Long Names) ---
-// Matches GET /api/drones response
-[Serializable]
-public class PagedSnapshotResult
-{
-    public List<DroneSnapshotModel> items;
-}
 
 [Serializable]
 public class DroneSnapshotModel
 {
-    // Matches dTITAN.Backend.Data.Mongo.Documents properties (CamelCase JSON)
-    public string droneId;       // Backend: DroneId
-    public string model;         // Backend: Model
-    public bool isConnected;     // Backend: IsConnected
-    public double batteryLevel;  // Backend: BatteryLevel
-    public bool isFlying;        // Backend: IsFlying
-    public bool areMotorsOn;
-    public bool areLightsOn;
+    // Must match JSON: "droneId"
+    public string droneId;
+    public string model;
+    public bool isConnected;
+    
+    // The JSON has a nested "telemetry" object, so we need a matching class
+    public DroneSnapshotTelemetry telemetry;
+}
+
+[Serializable]
+public class DroneSnapshotTelemetry
+{
+    public string timestamp;
+
+    public HomeLocation homeLocation;
+
     public double latitude;
     public double longitude;
     public double altitude;
+
+    public double velocityX;
+    public double velocityY;
+    public double velocityZ;
+
+    public double batteryLevel;
+    public double batteryTemperature;
+
+    public double heading;
+    public int satelliteCount;
+    public double remainingFlightTime;
+
+    public bool isTraveling;
+    public bool isFlying;
+    public bool online;
+    public bool isGoingHome;
+    public bool isHomeLocationSet;
+    public bool areMotorsOn;
+    public bool areLightsOn;
+}
+
+[Serializable]
+public class HomeLocation
+{
+    public double latitude;
+    public double longitude;
+}
+
+
+[Serializable]
+public class PagedSnapshotResult
+{
+    public System.Collections.Generic.List<DroneSnapshotModel> items;
+    public int totalCount;
 }

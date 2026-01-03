@@ -23,13 +23,13 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
         // Initialize with default empty data
         currentData = new DroneTelemetryData
         {
-            id = droneID,
+            droneId = droneID, // FIX: id -> droneId
             model = "DJI Mavic 3 (Sim)",
-            batLvl = 100.0,
+            batteryLevel = 100.0, // FIX: batLvl -> batteryLevel
             online = true,
             satCount = 12,
             isFlying = true,
-            areMotorsOn = true
+            motorsOn = true // FIX: areMotorsOn -> motorsOn
         };
     }
 
@@ -67,30 +67,30 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
         float time = Time.time - startTime;
 
         // 1. FLY IN A CIRCLE (Physics Simulation)
-        // We simulate latitude/longitude changes as local meter offsets for now
-        // In the real app, you'd map GPS to Unity coords.
         float angle = time * movementSpeed;
         
-        // Calculate fake velocity based on the circle movement
-        // Derivative of sin/cos is cos/-sin
-        currentData.velX = Math.Cos(angle) * movementSpeed * circleRadius;
-        currentData.velZ = Math.Sin(angle) * movementSpeed * circleRadius; // Unity Z is "North"
-        currentData.velY = 0; // Flat flight
+        // Calculate fake velocity
+        // FIX: velX/velZ -> velocityX/velocityZ
+        currentData.velocityX = Math.Cos(angle) * movementSpeed * circleRadius;
+        currentData.velocityZ = Math.Sin(angle) * movementSpeed * circleRadius; 
+        currentData.velocityY = 0; // FIX: velY -> velocityY
 
-        // Update Heading (Face forward)
-        float headingRad = Mathf.Atan2((float)currentData.velX, (float)currentData.velZ);
-        currentData.hdg = headingRad * Mathf.Rad2Deg;
+        // Update Heading
+        float headingRad = Mathf.Atan2((float)currentData.velocityX, (float)currentData.velocityZ);
+        currentData.heading = headingRad * Mathf.Rad2Deg; // FIX: hdg -> heading
 
-        // Altitude: Hover gently between 10m and 12m
-        currentData.alt = 10.0 + Mathf.Sin(time * 0.5f) * 2.0f;
+        // Altitude
+        // FIX: alt -> altitude
+        currentData.altitude = 10.0 + Mathf.Sin(time * 0.5f) * 2.0f;
 
         // 2. DRAIN BATTERY
-        currentData.batLvl -= 0.05f * Time.deltaTime; // Drains slowly
-        if (currentData.batLvl < 0) currentData.batLvl = 100; // Recharge loop
+        // FIX: batLvl -> batteryLevel
+        currentData.batteryLevel -= 0.05f * Time.deltaTime; 
+        if (currentData.batteryLevel < 0) currentData.batteryLevel = 100;
 
-        // 3. UPDATE POSITION (For the "Map" or "GPS")
-        // Note: These are fake GPS offsets
-        currentData.lat = 39.74362 + (Math.Sin(angle) * 0.0001); 
-        currentData.lng = -8.80705 + (Math.Cos(angle) * 0.0001);
+        // 3. UPDATE POSITION
+        // FIX: lat/lng -> latitude/longitude
+        currentData.latitude = 39.74362 + (Math.Sin(angle) * 0.0001); 
+        currentData.longitude = -8.80705 + (Math.Cos(angle) * 0.0001);
     }
 }

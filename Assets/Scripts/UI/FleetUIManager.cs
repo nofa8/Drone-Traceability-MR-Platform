@@ -97,18 +97,16 @@ public class FleetUIManager : MonoBehaviour
     // (Call this from DroneNetworkClient.cs)
     public void HandleLiveUpdate(DroneTelemetryData telemetry)
     {
-        // Update the card in the list
-        if (activeCards.ContainsKey(telemetry.id))
+        // Safety: Ignore bad data
+        if (string.IsNullOrEmpty(telemetry.droneId)) return;
+
+        if (activeCards.ContainsKey(telemetry.droneId))
         {
-            activeCards[telemetry.id].UpdateFromLive(telemetry);
+            activeCards[telemetry.droneId].UpdateFromLive(telemetry);
         }
 
-        // If this is the drone we are looking at in Detail View, update the 3D model
-        if (selectedDroneId == telemetry.id && detailController != null)
+        if (selectedDroneId == telemetry.droneId && detailController != null)
         {
-            // detailController needs to accept the telemetry data object
-            // You might need to update DroneTelemetryController to accept DroneTelemetryData directly
-            // or map it manually here. Assuming you updated it:
              detailController.UpdateVisuals(telemetry);
         }
     }
@@ -134,4 +132,20 @@ public class FleetUIManager : MonoBehaviour
         
         // Optional: Reset the 3D model position here?
     }
+
+
+
+    // ---------------- DEBUG TESTING ----------------
+    // This adds a "Right-Click" menu to the script in the Inspector
+    // DEBUG: Right-click component in Inspector to test UI without backend
+    [ContextMenu("Test: Add Fake Drone")]
+    public void TestAddFakeDrone()
+    {
+        DroneSnapshotModel fake = new DroneSnapshotModel();
+        fake.droneId = "Sim-" + Random.Range(100, 999);
+        fake.model = "Debug-X1";
+        fake.telemetry = new DroneSnapshotTelemetry { batteryLevel = 50, isFlying = true, online = true };
+        CreateOrUpdateCard(fake);
+    }
+
 }

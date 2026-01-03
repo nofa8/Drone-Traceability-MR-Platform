@@ -13,11 +13,30 @@ public class HandMenuController : MonoBehaviour
     [Tooltip("How far you can look away before it CLOSES (Lower = Easier to keep open)")]
     public float closeThreshold = 0.55f; 
 
+    [Header("Context Info")]
+    public TMPro.TextMeshProUGUI activeDroneText; 
+    
     void Start()
     {
         if (headCamera == null) headCamera = Camera.main.transform;
+
+        if (SelectionManager.Instance != null)
+        {
+            SelectionManager.Instance.OnDroneSelected += UpdateContextInfo;
+        }
     }
 
+    void UpdateContextInfo(string droneId)
+    {
+        if (activeDroneText)
+        {
+            if (string.IsNullOrEmpty(droneId))
+                activeDroneText.text = "No Drone Selected";
+            else
+                activeDroneText.text = $"Controlling: {droneId}";
+        }
+    }   
+    
     void Update()
     {
         if (headCamera == null || menuContent == null) return;

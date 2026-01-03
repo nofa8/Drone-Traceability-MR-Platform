@@ -1,33 +1,31 @@
 using System;
-using UnityEngine;
 
-// This matches the JSON sent by your backend
 [Serializable]
 public class DroneTelemetryData
 {
-    public string id;
+    // Identity
+    public string droneId;
     public string model;
     
     // Position
-    public double lat;
-    public double lng;
-    public double alt;
+    public double latitude;
+    public double longitude;
+    public double altitude;
     
     // Physics
-    public double velX;
-    public double velY;
-    public double velZ;
-    public double hdg; // Heading
+    public double velocityX;
+    public double velocityY;
+    public double velocityZ;
+    public double heading;
     
     // Status
-    public double batLvl; // Matches [JsonPropertyName("batLvl")]
-    public double batTemperature;
+    public double batteryLevel; // Normalized to match Internal usage
+    public double batteryTemp;
     public int satCount;
-    public int rft; // Remaining Flight Time
     
-    // Booleans
+    // Flags
     public bool isFlying;
-    public bool isTraveling;
     public bool online;
-    public bool areMotorsOn;
+    public bool motorsOn;
+    public bool lightsOn;
 }

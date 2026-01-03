@@ -11,10 +11,33 @@ public class DroneCardUI : MonoBehaviour
     public Image batteryFill;
     public Image statusIcon; // The colored circle
 
+    [Header("Selection Visuals")]
+    public Image selectionBorder; // Drag an 'Outline' image here
+    public Color selectedColor = Color.cyan;
+    public Color defaultColor = new Color(1, 1, 1, 0f);
+
+
     // Private state
     public string droneId { get; private set; }
     public string modelName { get; private set; }
 
+
+    void Start()
+    {
+        // Subscribe to global selection changes
+        if (SelectionManager.Instance != null)
+        {
+            SelectionManager.Instance.OnDroneSelected += HandleSelectionChanged;
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (SelectionManager.Instance != null)
+        {
+            SelectionManager.Instance.OnDroneSelected -= HandleSelectionChanged;
+        }
+    }
     // Initialize the card
     public void Setup(string id)
     {
@@ -30,21 +53,47 @@ public class DroneCardUI : MonoBehaviour
         }
     }
 
-    // UPDATE 1: From REST API (Snapshot)
+
+    void OnClick() // Ensure this is linked to your Button component
+    {
+        // Tell the Manager to select THIS drone
+        SelectionManager.Instance.SelectDrone(this.droneId);
+        
+        // Optional: Auto-switch to Dashboard view via PanelManager
+        PanelManager.Instance.TogglePanel("Dashboard");
+    }
+
+    private void HandleSelectionChanged(string newId)
+    {
+        bool isMe = (newId == this.droneId);
+        
+        if (selectionBorder)
+        {
+            selectionBorder.color = isMe ? selectedColor : defaultColor;
+        }
+    }   
+    
+    // REST API (Snapshot)
     public void UpdateFromSnapshot(DroneSnapshotModel data)
     {
         modelName = data.model;
         if (modelText) modelText.text = data.model;
         
-        // "isConnected" from backend usually means "Online"
-        UpdateVisuals(data.batteryLevel, data.isConnected, data.isFlying);
+        // Handle Nested Telemetry (Safe Navigation)
+        if (data.telemetry != null)
+        {
+            UpdateVisuals(data.telemetry.batteryLevel, data.telemetry.online, data.telemetry.isFlying);
+        }
+        else
+        {
+            UpdateVisuals(0, data.isConnected, false);
+        }
     }
 
-    // UPDATE 2: From WebSocket (Live Telemetry)
+    // WebSocket (Live)
     public void UpdateFromLive(DroneTelemetryData data)
     {
-        // WebSocket uses 'batLvl' instead of 'batteryLevel'
-        UpdateVisuals(data.batLvl, data.online, data.isFlying);
+        UpdateVisuals(data.batteryLevel, data.online, data.isFlying);
     }
 
     // Shared visual logic
