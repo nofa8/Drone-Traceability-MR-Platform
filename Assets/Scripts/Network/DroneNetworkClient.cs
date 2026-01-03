@@ -9,7 +9,7 @@ public class DroneNetworkClient : MonoBehaviour
 {
     [Header("Connection Settings")]
     [Tooltip("Use PC IP (e.g. 192.168.1.5) if on Quest")]
-    public string serverUrl = "ws://192.168.1.64:8083"; 
+    public string serverUrl = "ws://192.168.1.64:5101"; // Port 5101 as you mentioned
     public string droneID = "RD001";
     public bool autoReconnect = true;
 
@@ -36,7 +36,10 @@ public class DroneNetworkClient : MonoBehaviour
                 
                 ws = new ClientWebSocket();
                 cts = new CancellationTokenSource();
-                Uri uri = new Uri($"{serverUrl}");
+
+                // Generate a unique ID for this Dashboard so we don't kick the real drone off
+                string myClientID = "Dash-" + UnityEngine.Random.Range(1000, 9999);
+                Uri uri = new Uri($"{serverUrl}?dboidsID={myClientID}&role=monitor");
 
                 Debug.Log($"⏳ Connecting to {uri}...");
                 await ws.ConnectAsync(uri, cts.Token);
@@ -76,21 +79,25 @@ public class DroneNetworkClient : MonoBehaviour
                 }
             }
         }
-        catch (Exception) { /* Expected disconnect/error, loop will catch it */ }
+        catch (Exception) { /* Expected disconnect */ }
     }
 
     void ProcessMessageSafe(string json)
     {
         try
         {
+            // FIX: Use camelCase 'eventType'
             var probe = JsonUtility.FromJson<WS_EventProbe>(json);
-            if (probe == null || string.IsNullOrEmpty(probe.EventType)) return;
+            if (probe == null || string.IsNullOrEmpty(probe.eventType)) {
+                Debug.LogError($"✅ <color=green>Received {json} bytes</color>");
+                return;
+            }
 
-            if (probe.EventType == "DroneTelemetryReceived")
+            if (probe.eventType == "DroneTelemetryReceived")
             {
                 ParseTelemetry(json);
             }
-            else if (probe.EventType == "DroneDisconnected")
+            else if (probe.eventType == "DroneDisconnected")
             {
                 ParseDisconnect(json);
             }
@@ -104,33 +111,35 @@ public class DroneNetworkClient : MonoBehaviour
     void ParseTelemetry(string json)
     {
         var packet = JsonUtility.FromJson<WS_TelemetryEvent>(json);
-        if (packet?.Payload?.Telemetry == null) return;
+        
+        // FIX: Use camelCase 'payload' and 'telemetry'
+        if (packet?.payload?.telemetry == null) return;
 
-        // --- THE MAPPING (Raw -> Clean) ---
         DroneTelemetryData cleanData = new DroneTelemetryData();
-        var p = packet.Payload;
-        var t = p.Telemetry;
+        var p = packet.payload;
+        var t = p.telemetry;
 
-        cleanData.droneId = p.DroneId;
-        cleanData.model = p.Model;
+        // Map camelCase JSON -> camelCase Internal Data
+        cleanData.droneId = p.droneId;
+        cleanData.model = p.model;
         
-        cleanData.online = t.Online;
-        cleanData.isFlying = t.IsFlying;
-        cleanData.motorsOn = t.AreMotorsOn;
-        cleanData.lightsOn = t.AreLightsOn;
+        cleanData.online = t.online;
+        cleanData.isFlying = t.isFlying;
+        cleanData.motorsOn = t.areMotorsOn;
+        cleanData.lightsOn = t.areLightsOn;
         
-        cleanData.latitude = t.Latitude;
-        cleanData.longitude = t.Longitude;
-        cleanData.altitude = t.Altitude;
-        cleanData.heading = t.Heading;
+        cleanData.latitude = t.latitude;
+        cleanData.longitude = t.longitude;
+        cleanData.altitude = t.altitude;
+        cleanData.heading = t.heading;
         
-        cleanData.velocityX = t.VelocityX;
-        cleanData.velocityY = t.VelocityY;
-        cleanData.velocityZ = t.VelocityZ;
+        cleanData.velocityX = t.velocityX;
+        cleanData.velocityY = t.velocityY;
+        cleanData.velocityZ = t.velocityZ;
 
-        cleanData.batteryLevel = t.BatteryLevel;
-        cleanData.batteryTemp = t.BatteryTemperature;
-        cleanData.satCount = t.SatelliteCount;
+        cleanData.batteryLevel = t.batteryLevel;
+        cleanData.batteryTemp = t.batteryTemperature;
+        cleanData.satCount = t.satelliteCount;
 
         if (FleetUIManager.Instance != null)
             FleetUIManager.Instance.HandleLiveUpdate(cleanData);
@@ -139,10 +148,10 @@ public class DroneNetworkClient : MonoBehaviour
     void ParseDisconnect(string json)
     {
         var packet = JsonUtility.FromJson<WS_DisconnectEvent>(json);
-        if (packet != null && !string.IsNullOrEmpty(packet.Payload))
+        if (packet != null && !string.IsNullOrEmpty(packet.payload))
         {
             DroneTelemetryData offlineData = new DroneTelemetryData();
-            offlineData.droneId = packet.Payload;
+            offlineData.droneId = packet.payload;
             offlineData.online = false; 
             
             if (FleetUIManager.Instance != null)

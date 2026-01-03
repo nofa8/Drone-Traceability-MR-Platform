@@ -4,68 +4,68 @@ using System;
 [Serializable]
 public class WS_TelemetryEvent
 {
-    public string EventType;
-    public string TimeStamp; 
-    public WS_TelemetryPayload Payload;
+    public string eventType;  // Matches "eventType"
+    public string timeStamp;  // Matches "timeStamp"
+    public WS_TelemetryPayload payload; // Matches "payload"
 }
 
 [Serializable]
 public class WS_DisconnectEvent
 {
-    public string EventType;
-    public string TimeStamp; 
-    public string Payload;   
+    public string eventType;
+    public string timeStamp;
+    public string payload;   // The DroneID string
 }
 
 // 2. The Payload Layer
 [Serializable]
 public class WS_TelemetryPayload
 {
-    public string DroneId;
-    public string Model;
-    public WS_TelemetryDetails Telemetry;
+    public string droneId;
+    public string model;
+    public WS_TelemetryDetails telemetry;
 }
 
-// 3. The Details Layer (Must match JSON PascalCase exactly!)
+// 3. The Details Layer
 [Serializable]
 public class WS_TelemetryDetails
 {
-    public string Timestamp;
-    public WS_HomeLocation HomeLocation;
+    public string timestamp;
+    public WS_HomeLocation homeLocation;
 
-    public double Latitude;
-    public double Longitude;
-    public double Altitude;
+    public double latitude;
+    public double longitude;
+    public double altitude;
 
-    public double VelocityX;
-    public double VelocityY;
-    public double VelocityZ;
+    public double velocityX;
+    public double velocityY;
+    public double velocityZ;
 
-    public double BatteryLevel;       
-    public double BatteryTemperature; 
+    public double batteryLevel;       
+    public double batteryTemperature; 
     
-    public double Heading;
-    public int SatelliteCount;
-    public double RemainingFlightTime;
+    public double heading;
+    public int satelliteCount;
+    public double remainingFlightTime;
 
-    public bool IsTraveling;
-    public bool IsFlying;
-    public bool Online;
-    public bool IsGoingHome;
-    public bool IsHomeLocationSet;
-    public bool AreMotorsOn;
-    public bool AreLightsOn;
+    public bool isTraveling;
+    public bool isFlying;
+    public bool online;
+    public bool isGoingHome;
+    public bool isHomeLocationSet;
+    public bool areMotorsOn;
+    public bool areLightsOn;
 }
 
 [Serializable]
 public class WS_HomeLocation
 {
-    public double Latitude;
-    public double Longitude;
+    public double latitude;
+    public double longitude;
 }
 
 [Serializable]
 public class WS_EventProbe
 {
-    public string EventType;
+    public string eventType;
 }

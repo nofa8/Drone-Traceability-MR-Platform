@@ -9,125 +9,96 @@ public class DroneCardUI : MonoBehaviour
     public TextMeshProUGUI modelText;
     public TextMeshProUGUI statusText;
     public Image batteryFill;
-    public Image statusIcon; // The colored circle
+    public Image statusIcon; 
+    public Image selectionBorder; // Optional: Assign this in Inspector for visual feedback
 
-    [Header("Selection Visuals")]
-    public Image selectionBorder; // Drag an 'Outline' image here
-    public Color selectedColor = Color.cyan;
-    public Color defaultColor = new Color(1, 1, 1, 0f);
+    [Header("Settings")]
+    public Color selectedColor = Color.yellow;
+    public Color defaultColor = new Color(0, 0, 0, 0); // Transparent
 
-
-    // Private state
     public string droneId { get; private set; }
-    public string modelName { get; private set; }
 
-
+    // --- LIFECYCLE EVENTS (Fixing the Subscription Error) ---
     void Start()
     {
-        // Subscribe to global selection changes
         if (SelectionManager.Instance != null)
-        {
-            SelectionManager.Instance.OnDroneSelected += HandleSelectionChanged;
-        }
+            SelectionManager.Instance.OnSlotSelectionChanged += HandleSlotSelectionChanged;
     }
 
     void OnDestroy()
     {
         if (SelectionManager.Instance != null)
-        {
-            SelectionManager.Instance.OnDroneSelected -= HandleSelectionChanged;
-        }
+            SelectionManager.Instance.OnSlotSelectionChanged -= HandleSlotSelectionChanged;
     }
-    // Initialize the card
+
+    // --- SETUP & INTERACTION ---
     public void Setup(string id)
     {
         this.droneId = id;
         if (idText) idText.text = id;
-
-        // Make the entire card a button that opens details
+        
         Button btn = GetComponent<Button>();
         if (btn)
         {
+            // FIX: Ensure clean wiring so OnClick actually fires
             btn.onClick.RemoveAllListeners();
-            btn.onClick.AddListener(() => FleetUIManager.Instance.ShowDroneDetail(this.droneId));
+            btn.onClick.AddListener(OnClick);
         }
     }
 
-
-    void OnClick() // Ensure this is linked to your Button component
+    // The Logic: Set Intent -> Update State -> Navigate
+    void OnClick()
     {
-        // Tell the Manager to select THIS drone
-        SelectionManager.Instance.SelectDrone(this.droneId);
+        // 1. Get Intent (Which slot are we filling?)
+        int targetSlot = FleetUIManager.Instance.targetSlotId;
+
+        // 2. Update System State (The Database)
+        SelectionManager.Instance.SetDroneAtSlot(targetSlot, this.droneId);
         
-        // Optional: Auto-switch to Dashboard view via PanelManager
-        PanelManager.Instance.TogglePanel("Dashboard");
+        // 3. Navigate
+        FleetUIManager.Instance.ShowDroneDetail();
     }
 
-    private void HandleSelectionChanged(string newId)
+    // --- VISUAL FEEDBACK (Fixing the Event Handler) ---
+    private void HandleSlotSelectionChanged(int slotId, string selectedId)
     {
-        bool isMe = (newId == this.droneId);
-        
+        // Highlight this card if it is selected in ANY slot
+        bool isSelected = (selectedId == this.droneId);
+
         if (selectionBorder)
         {
-            selectionBorder.color = isMe ? selectedColor : defaultColor;
-        }
-    }   
-    
-    // REST API (Snapshot)
-    public void UpdateFromSnapshot(DroneSnapshotModel data)
-    {
-        modelName = data.model;
-        if (modelText) modelText.text = data.model;
-        
-        // Handle Nested Telemetry (Safe Navigation)
-        if (data.telemetry != null)
-        {
-            UpdateVisuals(data.telemetry.batteryLevel, data.telemetry.online, data.telemetry.isFlying);
-        }
-        else
-        {
-            UpdateVisuals(0, data.isConnected, false);
+            selectionBorder.color = isSelected ? selectedColor : defaultColor;
         }
     }
 
-    // WebSocket (Live)
+    // --- DATA UPDATES (Keep existing logic) ---
+    public void UpdateFromSnapshot(DroneSnapshotModel data)
+    {
+        if (modelText) modelText.text = data.model;
+        if (data.telemetry != null) UpdateVisuals(data.telemetry.batteryLevel, data.telemetry.online, data.telemetry.isFlying);
+        else UpdateVisuals(0, data.isConnected, false);
+    }
+
     public void UpdateFromLive(DroneTelemetryData data)
     {
         UpdateVisuals(data.batteryLevel, data.online, data.isFlying);
     }
 
-    // Shared visual logic
     private void UpdateVisuals(double battery, bool isOnline, bool isFlying)
     {
-        // Battery Bar (0 to 1)
         if (batteryFill)
         {
             batteryFill.fillAmount = (float)battery / 100f;
-            
-            // Color Coding
             if (battery < 20) batteryFill.color = Color.red;
             else if (battery < 50) batteryFill.color = Color.yellow;
             else batteryFill.color = Color.green;
         }
 
-        // Status Text & Icon
         if (statusText && statusIcon)
         {
-            if (!isOnline)
-            {
-                statusText.text = "OFFLINE";
-                statusIcon.color = Color.gray;
-            }
-            else if (isFlying)
-            {
-                statusText.text = "FLYING";
-                statusIcon.color = Color.cyan;
-            }
-            else
-            {
-                statusText.text = "ONLINE"; // Idle
-                statusIcon.color = Color.green;
-            }
+            if (!isOnline) { statusText.text = "OFFLINE"; statusIcon.color = Color.gray; }
+            else if (isFlying) { statusText.text = "FLYING"; statusIcon.color = Color.cyan; }
+            else { statusText.text = "ONLINE"; statusIcon.color = Color.green; }
         }
     }
 }

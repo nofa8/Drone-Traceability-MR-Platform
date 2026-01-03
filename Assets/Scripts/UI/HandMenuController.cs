@@ -1,74 +1,88 @@
 using UnityEngine;
+using UnityEngine.UI;
+using TMPro; // Needed for text updates
 
 public class HandMenuController : MonoBehaviour
 {
     [Header("References")]
     public Transform headCamera;
     public GameObject menuContent;
+    public TextMeshProUGUI activeDroneText; // Optional: To show "Monitoring: RD001"
+    
+    [Header("Buttons")]
+    public Button dashboardBtn; // ✅ Added missing field
+    // public Button mapBtn;
+
+    [Header("Context")]
+    public int contextSlotId = 0; // Which slot does this menu control?
 
     [Header("Settings")]
-    [Tooltip("How directly you must look to OPEN it (Higher = Harder)")]
     public float openThreshold = 0.80f; 
-    
-    [Tooltip("How far you can look away before it CLOSES (Lower = Easier to keep open)")]
     public float closeThreshold = 0.55f; 
 
-    [Header("Context Info")]
-    public TMPro.TextMeshProUGUI activeDroneText; 
-    
     void Start()
     {
-        if (headCamera == null) headCamera = Camera.main.transform;
+        if (headCamera == null && Camera.main != null) headCamera = Camera.main.transform;
 
+        // Subscribe to state changes
         if (SelectionManager.Instance != null)
+            SelectionManager.Instance.OnSlotSelectionChanged += HandleSlotChanged;
+
+        // Wire up the button
+        if(dashboardBtn) 
         {
-            SelectionManager.Instance.OnDroneSelected += UpdateContextInfo;
+            dashboardBtn.onClick.AddListener(() => {
+                // 1. Open the Panel
+                PanelManager.Instance.TogglePanel("Dashboard");
+                
+                // 2. Set Intent: We are looking at Slot 0
+                if (FleetUIManager.Instance != null)
+                {
+                    FleetUIManager.Instance.targetSlotId = contextSlotId;
+                }
+            });
         }
     }
 
-    void UpdateContextInfo(string droneId)
+    void OnDestroy()
     {
+        if (SelectionManager.Instance != null)
+            SelectionManager.Instance.OnSlotSelectionChanged -= HandleSlotChanged;
+    }
+
+    // Update the menu text when the drone changes
+    void HandleSlotChanged(int slotId, string droneId)
+    {
+        // Only update if this event is for OUR slot
+        if (slotId != contextSlotId) return;
+
         if (activeDroneText)
         {
-            if (string.IsNullOrEmpty(droneId))
-                activeDroneText.text = "No Drone Selected";
-            else
-                activeDroneText.text = $"Controlling: {droneId}";
+            activeDroneText.text = string.IsNullOrEmpty(droneId)
+                ? "No Drone Selected"
+                : $"Monitoring: {droneId}";
         }
-    }   
-    
+    }
+
     void Update()
     {
         if (headCamera == null || menuContent == null) return;
 
-        // 1. Get directions
         Vector3 dirToHand = (transform.position - headCamera.position).normalized;
-        // Check if palm is facing head (Generic check)
         float palmFacingDot = Vector3.Dot(transform.forward, -dirToHand);
-        // Check if head is looking at hand
         float lookDot = Vector3.Dot(headCamera.forward, dirToHand);
 
         bool isLookingAtHand = lookDot > openThreshold;
         bool isLookingNearHand = lookDot > closeThreshold;
-        bool isPalmFacing = palmFacingDot > 0.4f; // Generous palm check
+        bool isPalmFacing = palmFacingDot > 0.4f; 
 
-        // 2. The "Sticky" Logic
         if (menuContent.activeSelf)
         {
-            // If it's ALREADY open, keep it open as long as we are vaguely looking near it
-            // OR if the user is interacting with it (optional)
-            if (!isLookingNearHand || !isPalmFacing)
-            {
-                menuContent.SetActive(false);
-            }
+            if (!isLookingNearHand || !isPalmFacing) menuContent.SetActive(false);
         }
         else
         {
-            // If it's CLOSED, require a direct look to open it
-            if (isLookingAtHand && isPalmFacing)
-            {
-                menuContent.SetActive(true);
-            }
+            if (isLookingAtHand && isPalmFacing) menuContent.SetActive(true);
         }
     }
 }

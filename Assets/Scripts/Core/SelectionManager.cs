@@ -1,37 +1,44 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 
 public class SelectionManager : MonoBehaviour
 {
     public static SelectionManager Instance;
 
-    // The State: Which drone is currently active?
-    public string SelectedDroneId { get; private set; }
-    
-    // The Event: "Hey everyone, the selection changed!"
-    public event Action<string> OnDroneSelected;
+    // --- PURE SYSTEM STATE ---
+    // Mapping: Slot ID -> Drone ID
+    private Dictionary<int, string> slotSelections = new Dictionary<int, string>();
+
+    // Event: "Slot X changed its drone to Y"
+    public event Action<int, string> OnSlotSelectionChanged;
 
     void Awake()
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
+
+        // Initialize Slot 0 as empty (We can add more later)
+        slotSelections[0] = null;
     }
 
-    public void SelectDrone(string droneId)
+    // The ONLY way to select a drone now. No ambiguity.
+    public void SetDroneAtSlot(int slotId, string droneId)
     {
-        // Don't spam events if nothing changed
-        if (SelectedDroneId == droneId) return;
+        // 1. Check if actually changing
+        if (slotSelections.ContainsKey(slotId) && slotSelections[slotId] == droneId)
+            return;
 
-        SelectedDroneId = droneId;
-        Debug.Log($"🎯 Selection Changed: {droneId}");
+        // 2. Update State
+        slotSelections[slotId] = droneId;
+        Debug.Log($"🎯 System State Update: Slot {slotId} = {droneId}");
 
-        // Notify all listeners (Dashboard, Map, Hand Menu)
-        OnDroneSelected?.Invoke(droneId);
+        // 3. Notify Listeners (Dashboards)
+        OnSlotSelectionChanged?.Invoke(slotId, droneId);
     }
 
-    public void Deselect()
+    public string GetDroneAtSlot(int slotId)
     {
-        SelectedDroneId = null;
-        OnDroneSelected?.Invoke(null);
+        return slotSelections.ContainsKey(slotId) ? slotSelections[slotId] : null;
     }
 }
