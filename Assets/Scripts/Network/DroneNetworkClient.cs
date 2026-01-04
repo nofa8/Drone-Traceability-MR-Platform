@@ -7,9 +7,13 @@ using UnityEngine;
 
 public class DroneNetworkClient : MonoBehaviour
 {
+    // --- NEW EVENT ---
+    // The Map listens to this to draw ALL drones at once
+    public static event Action<DroneTelemetryData> OnGlobalTelemetry;
+
     [Header("Connection Settings")]
     [Tooltip("Use PC IP (e.g. 192.168.1.5) if on Quest")]
-    public string serverUrl = "ws://192.168.1.64:5101"; // Port 5101 as you mentioned
+    public string serverUrl = "ws://192.168.1.64:5101"; 
     public string droneID = "RD001";
     public bool autoReconnect = true;
 
@@ -19,7 +23,7 @@ public class DroneNetworkClient : MonoBehaviour
 
     async void Start()
     {
-        await Task.Delay(500); // Small startup delay
+        await Task.Delay(500); 
         await ConnectWithRetry();
     }
 
@@ -37,9 +41,8 @@ public class DroneNetworkClient : MonoBehaviour
                 ws = new ClientWebSocket();
                 cts = new CancellationTokenSource();
 
-                // Generate a unique ID for this Dashboard so we don't kick the real drone off
                 string myClientID = "Dash-" + UnityEngine.Random.Range(1000, 9999);
-                Uri uri = new Uri($"{serverUrl}?dboidsID={myClientID}&role=monitor");
+                Uri uri = new Uri($"{serverUrl}/ws?dboidsID={myClientID}&role=monitor");
 
                 Debug.Log($"⏳ Connecting to {uri}...");
                 await ws.ConnectAsync(uri, cts.Token);
@@ -86,12 +89,8 @@ public class DroneNetworkClient : MonoBehaviour
     {
         try
         {
-            // FIX: Use camelCase 'eventType'
             var probe = JsonUtility.FromJson<WS_EventProbe>(json);
-            if (probe == null || string.IsNullOrEmpty(probe.eventType)) {
-                Debug.LogError($"✅ <color=green>Received {json} bytes</color>");
-                return;
-            }
+            if (probe == null || string.IsNullOrEmpty(probe.eventType)) return;
 
             if (probe.eventType == "DroneTelemetryReceived")
             {
@@ -111,15 +110,12 @@ public class DroneNetworkClient : MonoBehaviour
     void ParseTelemetry(string json)
     {
         var packet = JsonUtility.FromJson<WS_TelemetryEvent>(json);
-        
-        // FIX: Use camelCase 'payload' and 'telemetry'
         if (packet?.payload?.telemetry == null) return;
 
         DroneTelemetryData cleanData = new DroneTelemetryData();
         var p = packet.payload;
         var t = p.telemetry;
 
-        // Map camelCase JSON -> camelCase Internal Data
         cleanData.droneId = p.droneId;
         cleanData.model = p.model;
         
@@ -141,8 +137,12 @@ public class DroneNetworkClient : MonoBehaviour
         cleanData.batteryTemp = t.batteryTemperature;
         cleanData.satCount = t.satelliteCount;
 
+        // 1. Send to Fleet Manager (UI List)
         if (FleetUIManager.Instance != null)
             FleetUIManager.Instance.HandleLiveUpdate(cleanData);
+
+        // 2. Broadcast to Map (Global)
+        OnGlobalTelemetry?.Invoke(cleanData);
     }
 
     void ParseDisconnect(string json)
@@ -156,6 +156,9 @@ public class DroneNetworkClient : MonoBehaviour
             
             if (FleetUIManager.Instance != null)
                 FleetUIManager.Instance.HandleLiveUpdate(offlineData);
+            
+            // Also notify map so it can maybe turn the dot gray?
+             OnGlobalTelemetry?.Invoke(offlineData);
         }
     }
 
