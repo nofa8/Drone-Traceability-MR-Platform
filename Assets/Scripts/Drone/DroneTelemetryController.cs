@@ -35,6 +35,7 @@ public class DroneTelemetryController : MonoBehaviour
     // The ID of the drone this dashboard is currently tracking
     private string currentTargetId;
 
+
     void Start()
     {
         // 1. Setup Visualizer
@@ -88,9 +89,15 @@ public class DroneTelemetryController : MonoBehaviour
             if (modelText) modelText.text = "Model: -";
             if (satelliteText) satelliteText.text = "Satellite Count: -";
             if (statusText) statusText.text = "Status: -";
-            return;
+
+            if (visualizer != null)
+            {
+                visualizer.ResetToIdle();
+            }
+            
         }
     }
+
 
     public void UpdateVisuals(DroneTelemetryData data)
     {

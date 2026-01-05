@@ -7,18 +7,15 @@ public class HandMenuController : MonoBehaviour
     [Header("References")]
     public Transform headCamera;
     public GameObject menuContent;
-    public TextMeshProUGUI activeDroneText; 
+    public TextMeshProUGUI activeDroneText;
     
-    [Header("Buttons")]
-    public Button dashboardBtn; 
+    [Header("Main Buttons")]
+    public Button dashboardBtn; // The "Smart" Button
 
     [Header("Slot Controls")]
     public Button addSlotBtn;
-    public Button slot0Btn; 
-    public Button slot1Btn;
-
-    [Header("Context")]
-    public int contextSlotId = 0; // The slot this menu represents
+    // We use an array now for easy expansion (Slot 0, 1, 2, 3)
+    public Button[] slotButtons; 
 
     [Header("Settings")]
     public float openThreshold = 0.80f; 
@@ -28,55 +25,90 @@ public class HandMenuController : MonoBehaviour
     {
         if (headCamera == null && Camera.main != null) headCamera = Camera.main.transform;
 
-        // Subscribe to state changes
+        // 1. Subscribe to state changes (to update text)
         if (SelectionManager.Instance != null)
-            SelectionManager.Instance.OnSlotSelectionChanged += HandleSlotChanged;
+        {
+            SelectionManager.Instance.OnActiveSlotChanged += UpdateUI;
+            SelectionManager.Instance.OnSlotSelectionChanged += (slot, drone) => UpdateUI(SelectionManager.Instance.ActiveSlotId);
+            SelectionManager.Instance.OnSlotCreated += (slot) => UpdateSlotButtons();
+        }
 
-        // Wire up the Dashboard Button
+        // 2. Wire up "Add Slot"
+        if (addSlotBtn)
+             addSlotBtn.onClick.AddListener(() => SelectionManager.Instance.CreateSlot());
+
+        // 3. Wire up Slot Buttons (0, 1, 2, 3)
+        for (int i = 0; i < slotButtons.Length; i++)
+        {
+            int slotIndex = i; // Capture index for lambda
+            if (slotButtons[i] != null)
+            {
+                slotButtons[i].onClick.AddListener(() => SelectionManager.Instance.SetActiveSlot(slotIndex));
+            }
+        }
+
+        // 4. Wire up "Smart Dashboard" Button
         if(dashboardBtn) 
         {
-            dashboardBtn.onClick.AddListener(() => {
-                // 1. Open the Panel
-                PanelManager.Instance.TogglePanel("Dashboard");
-                
-                // 2. Set Intent: Set the System Focus to this menu's slot
-                if (SelectionManager.Instance != null)
-                {
-                    // FIX: Use SetActiveSlot instead of the removed targetSlotId
-                    SelectionManager.Instance.SetActiveSlot(contextSlotId);
-                }
-            }); // FIX: Removed the extra }); here
+            dashboardBtn.onClick.AddListener(OnDashboardClicked);
         }
-        
-        // Wire up Slice Controls (For testing)
-        if (addSlotBtn) 
-            addSlotBtn.onClick.AddListener(() => SelectionManager.Instance.CreateSlot());
 
-        if (slot0Btn) 
-            slot0Btn.onClick.AddListener(() => SelectionManager.Instance.SetActiveSlot(0));
-
-        if (slot1Btn) 
-            slot1Btn.onClick.AddListener(() => SelectionManager.Instance.SetActiveSlot(1));
+        // Init UI
+        UpdateSlotButtons();
+        if (SelectionManager.Instance != null) UpdateUI(SelectionManager.Instance.ActiveSlotId);
     }
 
     void OnDestroy()
     {
-        if (SelectionManager.Instance != null)
-            SelectionManager.Instance.OnSlotSelectionChanged -= HandleSlotChanged;
+        if (SelectionManager.Instance == null) return;
+
+        SelectionManager.Instance.OnActiveSlotChanged -= UpdateUI;
+        SelectionManager.Instance.OnSlotCreated -= (slot) => UpdateSlotButtons();
     }
 
-    void HandleSlotChanged(int slotId, string droneId)
+    // 🔥 THE SMART LOGIC
+    void OnDashboardClicked()
     {
-        if (slotId != contextSlotId) return;
+        if (SelectionManager.Instance == null) Debug.LogError("❌ Missing: SelectionManager (Check 'System' object)");
+        if (PanelManager.Instance == null) Debug.LogError("❌ Missing: PanelManager (Do you have this script?)");
+        if (FleetUIManager.Instance == null) Debug.LogError("❌ Missing: FleetUIManager (Is Dashboard disabled?)");
 
-        if (activeDroneText)
+        PanelManager.Instance.TogglePanel("Dashboard");
+
+        int activeSlot = SelectionManager.Instance.ActiveSlotId;
+        string assignedDrone = SelectionManager.Instance.GetDroneAtSlot(activeSlot);
+
+        if (string.IsNullOrEmpty(assignedDrone))
+            FleetUIManager.Instance.ShowFleetView();
+        else
+            FleetUIManager.Instance.ShowDroneDetail();
+    }
+
+    void UpdateSlotButtons()
+    {
+        // Only show buttons for slots that actually exist
+        if (SelectionManager.Instance == null) return;
+        
+        var allSlots = SelectionManager.Instance.GetAllSlots();
+        for (int i = 0; i < slotButtons.Length; i++)
         {
-            activeDroneText.text = string.IsNullOrEmpty(droneId)
-                ? "No Drone Selected"
-                : $"Monitoring: {droneId}";
+            if (slotButtons[i] == null) continue;
+            // Active if slot 'i' exists in the system
+            slotButtons[i].gameObject.SetActive(allSlots.Contains(i));
         }
     }
 
+    void UpdateUI(int activeSlotId)
+    {
+        string droneId = SelectionManager.Instance.GetDroneAtSlot(activeSlotId);
+        
+        if (activeDroneText)
+        {
+            activeDroneText.text = $"SLOT {activeSlotId}: {(string.IsNullOrEmpty(droneId) ? "EMPTY" : droneId)}";
+        }
+    }
+
+    // ... (Keep existing Update() for palm detection) ...
     void Update()
     {
         if (headCamera == null || menuContent == null) return;
@@ -85,17 +117,23 @@ public class HandMenuController : MonoBehaviour
         float palmFacingDot = Vector3.Dot(transform.forward, -dirToHand);
         float lookDot = Vector3.Dot(headCamera.forward, dirToHand);
 
-        bool isLookingAtHand = lookDot > openThreshold;
         bool isLookingNearHand = lookDot > closeThreshold;
         bool isPalmFacing = palmFacingDot > 0.4f; 
 
         if (menuContent.activeSelf)
         {
             if (!isLookingNearHand || !isPalmFacing) menuContent.SetActive(false);
+            else SmoothLookAt();
         }
         else
         {
-            if (isLookingAtHand && isPalmFacing) menuContent.SetActive(true);
+            if (isLookingNearHand && isPalmFacing && lookDot > openThreshold) menuContent.SetActive(true);
         }
+    }
+
+    void SmoothLookAt()
+    {
+        Quaternion targetRot = Quaternion.LookRotation(menuContent.transform.position - headCamera.position);
+        menuContent.transform.rotation = Quaternion.Slerp(menuContent.transform.rotation, targetRot, Time.deltaTime * 10f);
     }
 }

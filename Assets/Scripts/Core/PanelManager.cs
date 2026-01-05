@@ -29,7 +29,6 @@ public class PanelManager : MonoBehaviour
 
     public void TogglePanel(string panelName)
     {
-        Debug.LogWarning($"Toggling panel: {panelName}");
         if (panels.ContainsKey(panelName))
         {
             bool isActive = panels[panelName].activeSelf;

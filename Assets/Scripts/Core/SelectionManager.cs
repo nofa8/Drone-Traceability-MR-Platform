@@ -1,7 +1,7 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
-using System.Linq; // Useful for keys
+using System.Linq;
 
 public class SelectionManager : MonoBehaviour
 {
@@ -14,14 +14,17 @@ public class SelectionManager : MonoBehaviour
     // Mapping: Slot ID -> Drone ID
     private Dictionary<int, string> slotSelections = new Dictionary<int, string>();
     
-    // The "Focus": Which slot is currently receiving assignments?
+    // NEW: Explicit Order List (Fixes non-deterministic dictionary behavior)
+    private List<int> slotOrder = new List<int>();
+
+    // The "Focus"
     public int ActiveSlotId { get; private set; } = 0;
 
     // --- EVENTS ---
-    public event Action<int, string> OnSlotSelectionChanged; // Slot X assigned to Drone Y
-    public event Action<int> OnActiveSlotChanged;            // User switched focus to Slot X
-    public event Action<int> OnSlotCreated;                  // New Dashboard needed
-    public event Action<int> OnSlotRemoved;                  // Dashboard closed
+    public event Action<int, string> OnSlotSelectionChanged; 
+    public event Action<int> OnActiveSlotChanged;            
+    public event Action<int> OnSlotCreated;                  
+    public event Action<int> OnSlotRemoved;                  
 
     void Awake()
     {
@@ -29,13 +32,13 @@ public class SelectionManager : MonoBehaviour
         else Destroy(gameObject);
 
         // Always start with Slot 0
-        CreateSlot(); 
-        SetActiveSlot(0);
+        CreateSlot(true); 
     }
 
     // --- LIFECYCLE API ---
 
-    public bool CreateSlot()
+    // Updated: Added autoFocus parameter for future safety
+    public bool CreateSlot(bool autoFocus = true)
     {
         if (slotSelections.Count >= maxSlots)
         {
@@ -43,32 +46,50 @@ public class SelectionManager : MonoBehaviour
             return false;
         }
 
-        // Find next available ID (simple auto-increment logic)
+        // Find next ID
         int newSlotId = 0;
         while (slotSelections.ContainsKey(newSlotId)) newSlotId++;
 
         slotSelections.Add(newSlotId, null);
+        slotOrder.Add(newSlotId); // Track order
+
         Debug.Log($"➕ Slot {newSlotId} created");
-        
         OnSlotCreated?.Invoke(newSlotId);
         
-        // Auto-focus the new slot? Optional. Let's do it for convenience.
-        SetActiveSlot(newSlotId);
+        if (autoFocus)
+            SetActiveSlot(newSlotId);
+            
         return true;
     }
 
     public void RemoveSlot(int slotId)
     {
         if (!slotSelections.ContainsKey(slotId)) return;
-        if (slotSelections.Count <= 1 && slotId == 0) return; // Don't delete the last slot
+        
+        // Don't remove if it's the only one left (Fallback to first created)
+        if (slotSelections.Count <= 1 && slotOrder.Count > 0 && slotId == slotOrder[0]) return;
+
+        // 🔥 FIX 1: Cleanup drone assignment BEFORE removing slot
+        // This ensures Map/Trails turn "White" (Unassigned) instead of staying Cyan forever
+        string assignedDrone = slotSelections[slotId];
+        if (!string.IsNullOrEmpty(assignedDrone))
+        {
+             OnSlotSelectionChanged?.Invoke(slotId, null);
+        }
 
         slotSelections.Remove(slotId);
+        slotOrder.Remove(slotId); // Keep order clean
+
         Debug.Log($"➖ Slot {slotId} removed");
         OnSlotRemoved?.Invoke(slotId);
 
-        // If we deleted the active slot, reset focus to 0
+        // 🔥 FIX 4: Deterministic Fallback
+        // If we deleted the active slot, reset focus to the first available slot
         if (ActiveSlotId == slotId)
-            SetActiveSlot(slotSelections.Keys.First());
+        {
+            if (slotOrder.Count > 0)
+                SetActiveSlot(slotOrder[0]);
+        }
     }
 
     // --- ACTIVE SLOT API ---
@@ -87,17 +108,36 @@ public class SelectionManager : MonoBehaviour
 
     // --- ASSIGNMENT API ---
 
-    // The primary way UI interacts now: "Assign this drone to whatever is active"
     public void AssignDroneToActiveSlot(string droneId)
     {
         SetDroneAtSlot(ActiveSlotId, droneId);
     }
 
-    // Direct assignment (internal use or load/save)
+    // NEW: Explicit Clear API (Cleaner than passing null)
+    public void ClearSlot(int slotId)
+    {
+         if (!slotSelections.ContainsKey(slotId)) return;
+         SetDroneAtSlot(slotId, null);
+    }
+
     public void SetDroneAtSlot(int slotId, string droneId)
     {
         if (!slotSelections.ContainsKey(slotId)) return;
         if (slotSelections[slotId] == droneId) return;
+
+        // 🔥 FIX 2: Enforce Uniqueness (One Drone = One Slot)
+        // If we are trying to assign a REAL drone (not clearing)...
+        if (!string.IsNullOrEmpty(droneId))
+        {
+            int existingSlot = GetSlotForDrone(droneId);
+            if (existingSlot != -1 && existingSlot != slotId)
+            {
+                Debug.LogWarning($"⚠️ Drone {droneId} is already in Slot {existingSlot}. Assignment blocked.");
+                // Option: You could "steal" it here by calling ClearSlot(existingSlot) first.
+                // For now, blocking is safer.
+                return; 
+            }
+        }
 
         slotSelections[slotId] = droneId;
         Debug.Log($"🎯 System Update: Slot {slotId} = {droneId}");
@@ -122,6 +162,6 @@ public class SelectionManager : MonoBehaviour
     
     public List<int> GetAllSlots()
     {
-        return new List<int>(slotSelections.Keys);
+        return new List<int>(slotOrder); // Return a safe copy
     }
 }
