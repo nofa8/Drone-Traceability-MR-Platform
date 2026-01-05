@@ -5,34 +5,28 @@ using System.Collections.Generic;
 public class MapPanelController : MonoBehaviour
 {
     [Header("Configuration")]
-    public RectTransform mapRect; // The RawImage of the map
-    public GameObject markerPrefab; // The tiny dot/arrow prefab
-    public GameObject trailPrefab; // Trail renderer prefab
+    public RectTransform mapRect; 
+    public GameObject markerPrefab; 
+    public GameObject trailPrefab; 
 
     [Header("GPS Bounds (Calibration)")]
-    // 🛑 CRITICAL: These must match the corners of your screenshot EXACTLY
-    // Defaulting to Leiria, Portugal (Sim Area)
-    public Vector2 topLeftGPS = new Vector2(39.7480f, -8.8130f);     // Lat (X), Lon (Y) for inspector convenience
+    public Vector2 topLeftGPS = new Vector2(39.7480f, -8.8130f);     
     public Vector2 bottomRightGPS = new Vector2(39.7390f, -8.8010f); 
 
-    [Header("System Architecture")]
-    public int assignedSlotId = 0; // 0 = Main Monitor
+    [Header("Slot Colors")]
+    public Color[] slotColors = new Color[] { Color.cyan, new Color(1f, 0.5f, 0f) }; // Slot 0 = Cyan, Slot 1 = Orange
+    public Color unassignedColor = Color.white;
 
     // State
     private Dictionary<string, RectTransform> markers = new Dictionary<string, RectTransform>();
     private Dictionary<string, MapTrackRenderer> trails = new Dictionary<string, MapTrackRenderer>();
-    private string selectedDroneId;
 
     void Start()
     {
-        // 1. Listen for Selection Changes (To highlight the specific drone)
         if (SelectionManager.Instance != null)
         {
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSelectionChanged;
-            selectedDroneId = SelectionManager.Instance.GetDroneAtSlot(assignedSlotId);
         }
-
-        // 2. Listen for Global Telemetry (To move ALL dots)
         DroneNetworkClient.OnGlobalTelemetry += HandleTelemetry;
     }
 
@@ -44,96 +38,139 @@ public class MapPanelController : MonoBehaviour
         DroneNetworkClient.OnGlobalTelemetry -= HandleTelemetry;
     }
 
-    // --- THE MATH LAYER ---
     void HandleTelemetry(DroneTelemetryData data)
     {
-        // 1. Get or Create Marker
+        // 1. Calculate Normalized Position using RAW MATH (not InverseLerp which clamps to 0-1)
+        float rangeX = bottomRightGPS.y - topLeftGPS.y;
+        float normX = ((float)data.longitude - topLeftGPS.y) / rangeX;
+
+        float rangeY = topLeftGPS.x - bottomRightGPS.x;
+        float normY = ((float)data.latitude - bottomRightGPS.x) / rangeY;
+
+        // 2. STRICT BOUNDS CHECK
+        bool isInsideMap = (normX >= 0f && normX <= 1f && normY >= 0f && normY <= 1f);
+
+        // --- ENSURE OBJECTS EXIST ---
         if (!markers.ContainsKey(data.droneId))
         {
-            GameObject newMarker = Instantiate(markerPrefab, mapRect);
-            newMarker.transform.localPosition = Vector3.zero; 
-            newMarker.transform.localScale = Vector3.one;
-            // Ensure z-position is 0
-            newMarker.transform.localPosition = new Vector3(newMarker.transform.localPosition.x, newMarker.transform.localPosition.y, 0);
-            
-            markers.Add(data.droneId, newMarker.GetComponent<RectTransform>());
-            
-            // Spawn Trail (behind markers)
-            if (trailPrefab != null)
-            {
-                GameObject newTrail = Instantiate(trailPrefab, mapRect);
-                newTrail.transform.localPosition = Vector3.zero;
-                newTrail.transform.localScale = Vector3.one;
-                newTrail.transform.SetAsFirstSibling(); // Put BEHIND markers
-                
-                MapTrackRenderer tr = newTrail.GetComponent<MapTrackRenderer>();
-                tr.Setup(Color.cyan);
-                trails.Add(data.droneId, tr);
-            }
+            CreateMarkerAndTrail(data.droneId);
         }
 
         RectTransform marker = markers[data.droneId];
+        MapTrackRenderer trail = trails.ContainsKey(data.droneId) ? trails[data.droneId] : null;
 
-        // 2. Normalize GPS (Lat/Lon) to [0..1]
-        // "Mathf.InverseLerp" calculates where a value sits between a min and max
-        
-        // Longitude (X): Left (Min) to Right (Max)
-        // topLeftGPS.y is Left Longitude, bottomRightGPS.y is Right Longitude
-        float normX = Mathf.InverseLerp(topLeftGPS.y, bottomRightGPS.y, (float)data.longitude);
-        
-        // Latitude (Y): Bottom (Min) to Top (Max)
-        // bottomRightGPS.x is Bottom Lat, topLeftGPS.x is Top Lat
-        float normY = Mathf.InverseLerp(bottomRightGPS.x, topLeftGPS.x, (float)data.latitude);
-
-        // 3. Project to Canvas Coordinates
-        // This assumes your Map Rect pivot is Center (0.5, 0.5)
-        float xPos = (normX - 0.5f) * mapRect.rect.width;
-        float yPos = (normY - 0.5f) * mapRect.rect.height;
-
-        marker.anchoredPosition = new Vector2(xPos, yPos);
-
-        // 4. Update Rotation (Heading)
-        marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
-
-        // 5. Update Trail
-        if (trails.ContainsKey(data.droneId))
+        // --- VISIBILITY ENFORCEMENT ---
+        if (!isInsideMap)
         {
-            trails[data.droneId].AddPoint(new Vector2(xPos, yPos));
+            if (marker.gameObject.activeSelf) marker.gameObject.SetActive(false);
+            
+            if (trail != null)
+            {
+                if (trail.gameObject.activeSelf)
+                {
+                    trail.Clear();
+                    trail.gameObject.SetActive(false);
+                }
+            }
+            return;
         }
 
-        // 6. Refresh Colors
-        UpdateMarkerVisuals(data.droneId, marker);
+        // --- DRONE IS VISIBLE ---
+        if (!marker.gameObject.activeSelf) marker.gameObject.SetActive(true);
+        if (trail != null && !trail.gameObject.activeSelf) trail.gameObject.SetActive(true);
+
+        // 3. Position Calculation
+        float xPos = (normX - 0.5f) * mapRect.rect.width;
+        float yPos = (normY - 0.5f) * mapRect.rect.height;
+        Vector2 localPos = new Vector2(xPos, yPos);
+
+        // 4. Update Marker
+        marker.anchoredPosition = localPos;
+        marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
+
+        // 5. Update Visuals (Slot-Based Coloring)
+        UpdateVisuals(data.droneId);
+
+        // 6. Update Trail
+        if (trail != null)
+        {
+            trail.AddPoint(localPos);
+        }
+    }
+
+    void CreateMarkerAndTrail(string id)
+    {
+        // Marker
+        GameObject newMarker = Instantiate(markerPrefab, mapRect);
+        newMarker.transform.localPosition = Vector3.zero; 
+        newMarker.transform.localScale = Vector3.one;
+        newMarker.transform.localPosition = new Vector3(newMarker.transform.localPosition.x, newMarker.transform.localPosition.y, 0);
+        
+        newMarker.AddComponent<MapMarkerUI>().Setup(id);
+        markers.Add(id, newMarker.GetComponent<RectTransform>());
+
+        // Trail
+        if (trailPrefab != null)
+        {
+            GameObject newTrail = Instantiate(trailPrefab, mapRect);
+            newTrail.transform.localPosition = Vector3.zero;
+            newTrail.transform.localScale = Vector3.one;
+            newTrail.transform.SetAsFirstSibling();
+            
+            MapTrackRenderer tr = newTrail.GetComponent<MapTrackRenderer>();
+            tr.Setup(unassignedColor); // Start with unassigned color
+            trails.Add(id, tr);
+        }
     }
 
     void HandleSelectionChanged(int slotId, string droneId)
     {
-        if (slotId != assignedSlotId) return;
-
-        selectedDroneId = droneId;
-        
-        // Refresh all markers to update highlights
-        foreach(var kvp in markers)
+        // When assignment changes, refresh visuals for ALL drones
+        foreach(var id in markers.Keys)
         {
-            UpdateMarkerVisuals(kvp.Key, kvp.Value);
+            UpdateVisuals(id);
         }
     }
 
-    void UpdateMarkerVisuals(string droneId, RectTransform marker)
+    // Centralized Visual Logic - Slot-Based Coloring
+    void UpdateVisuals(string droneId)
     {
+        if (!markers.ContainsKey(droneId)) return;
+
+        RectTransform marker = markers[droneId];
         Image img = marker.GetComponent<Image>();
-        if (img)
+        
+        // Ask the Brain: "Which slot owns this drone?"
+        int ownerSlot = -1;
+        if (SelectionManager.Instance != null)
         {
-            if (droneId == selectedDroneId)
-            {
-                img.color = Color.cyan; // Highlight
-                marker.SetAsLastSibling(); // Bring to front
-                marker.localScale = Vector3.one * 1.5f; 
-            }
-            else
-            {
-                img.color = Color.white; // Default
-                marker.localScale = Vector3.one;
-            }
+            ownerSlot = SelectionManager.Instance.GetSlotForDrone(droneId);
+        }
+
+        // Determine Color based on slot ownership
+        Color targetColor = unassignedColor;
+        float scale = 1.0f;
+
+        if (ownerSlot != -1)
+        {
+            // Assigned to a slot - use that slot's color
+            if (ownerSlot < slotColors.Length) 
+                targetColor = slotColors[ownerSlot];
+            else 
+                targetColor = Color.magenta; // Fallback for unknown slots
+
+            scale = 1.5f; // Assigned drones are bigger
+        }
+
+        // Apply to Marker
+        if (img) img.color = targetColor;
+        marker.localScale = Vector3.one * scale;
+        if (ownerSlot != -1) marker.SetAsLastSibling(); // Assigned drones on top
+
+        // Apply to Trail (Sync color)
+        if (trails.ContainsKey(droneId))
+        {
+            trails[droneId].SetColor(targetColor);
         }
     }
 }

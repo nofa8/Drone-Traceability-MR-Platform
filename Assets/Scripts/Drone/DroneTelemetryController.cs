@@ -9,10 +9,19 @@ public class DroneTelemetryController : MonoBehaviour
     public GameObject dataSourceObject; 
     private IDroneDataSource dataSource;
 
-    [Header("UI References")]
+    [Header("UI References - Flight Data")]
     public TextMeshProUGUI speedText;
     public TextMeshProUGUI altitudeText;
     public TextMeshProUGUI batteryText;
+
+    [Header("UI References - Location")]
+    public TextMeshProUGUI latitudeText;
+    public TextMeshProUGUI longitudeText;
+
+    [Header("UI References - Status")]
+    public TextMeshProUGUI modelText;
+    public TextMeshProUGUI satelliteText;
+    public TextMeshProUGUI statusText;
     
     [Header("3D Digital Twin")]
     public Transform droneModel;
@@ -38,7 +47,6 @@ public class DroneTelemetryController : MonoBehaviour
             SelectionManager.Instance.OnSlotSelectionChanged += OnSlotChanged;
             
             // Initialize with whatever is currently in this slot
-            // FIX 1: Correct Method Name (GetDroneAtSlot)
             string existingId = SelectionManager.Instance.GetDroneAtSlot(assignedSlotId);
             
             if (!string.IsNullOrEmpty(existingId))
@@ -59,7 +67,6 @@ public class DroneTelemetryController : MonoBehaviour
         }
         else
         {
-            // FIX 3: Don't error out if missing. We might be in "Passive Mode" (Network driven).
             Debug.Log($"ℹ️ DroneController (Slot {assignedSlotId}): Passive Mode. Waiting for FleetManager.");
         }
     }
@@ -75,25 +82,48 @@ public class DroneTelemetryController : MonoBehaviour
         // Visual Reset if deselected
         if (string.IsNullOrEmpty(newDroneId))
         {
-            if (speedText) speedText.text = "Waiting...";
+            if (speedText) speedText.text = "Speed: -";
+            if (latitudeText) latitudeText.text = "Latitude: -";
+            if (longitudeText) longitudeText.text = "Longitude: -";
+            if (modelText) modelText.text = "Model: -";
+            if (satelliteText) satelliteText.text = "Satellite Count: -";
+            if (statusText) statusText.text = "Status: -";
             return;
         }
     }
 
-    // FIX 2: Removed dead code "OnSelectionChanged" which was never used.
-
     public void UpdateVisuals(DroneTelemetryData data)
     {
         // 🔒 SECURITY CHECK: Only update if this data belongs to the selected drone
-        // If currentTargetId is null, we shouldn't show anything.
         if (data.droneId != currentTargetId) return; 
         
         // --- UI Updates ---
         double speed = Math.Sqrt(data.velocityX * data.velocityX + data.velocityZ * data.velocityZ);
         
         if (speedText) speedText.text = $"Speed: {speed:F1} m/s";
-        if (altitudeText) altitudeText.text = $"Alt: {data.altitude:F1} m";
-        if (batteryText) batteryText.text = $"Bat: {data.batteryLevel:F0}%";
+        if (altitudeText) altitudeText.text = $"Altitude: {data.altitude:F1} m";
+        if (batteryText) batteryText.text = $"Battery: {data.batteryLevel:F0}%";
+
+        // --- Location Updates ---
+        if (latitudeText) latitudeText.text = $"Latitude: {data.latitude:F5}";
+        if (longitudeText) longitudeText.text = $"Longitude: {data.longitude:F5}";
+
+        // --- Status Updates ---
+        if (modelText) modelText.text = "Model: "+data.model;
+        
+        if (satelliteText) 
+        {
+            // Color code: Green if good GPS (>=10), Yellow if marginal, Red if bad
+            string color = data.satCount >= 10 ? "green" : (data.satCount >= 6 ? "yellow" : "red");
+            satelliteText.text = $"Satellite Count: <color={color}>{data.satCount}</color>";
+        }
+
+        if (statusText)
+        {
+            if (data.isFlying) statusText.text = "<color=green>FLYING</color>";
+            else if (data.motorsOn) statusText.text = "<color=yellow>ARMED</color>";
+            else statusText.text = "<color=grey>IDLE</color>";
+        }
 
         // --- 3D Model Movement ---
         if (droneModel)

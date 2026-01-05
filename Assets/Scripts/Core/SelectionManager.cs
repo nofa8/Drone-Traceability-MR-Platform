@@ -41,4 +41,15 @@ public class SelectionManager : MonoBehaviour
     {
         return slotSelections.ContainsKey(slotId) ? slotSelections[slotId] : null;
     }
+
+    // Reverse lookup: Drone ID -> Slot ID
+    // Returns -1 if the drone is not currently assigned to any slot
+    public int GetSlotForDrone(string droneId)
+    {
+        foreach (var kvp in slotSelections)
+        {
+            if (kvp.Value == droneId) return kvp.Key;
+        }
+        return -1; // Not assigned
+    }
 }

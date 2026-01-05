@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 6135990493002687059}
   - component: {fileID: 7086957092665792356}
   - component: {fileID: 24833267834837019}
+  - component: {fileID: 2723791348732810743}
   m_Layer: 0
   m_Name: SpritWithDrone
   m_TagString: Untagged
@@ -76,6 +77,18 @@ MonoBehaviour:
   m_FillOrigin: 0
   m_UseSpriteMesh: 0
   m_PixelsPerUnitMultiplier: 1
+--- !u!114 &2723791348732810743
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6902245191402640422}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cca3f831791055d43a39cbc3bde96c83, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MapMarkerUI
 --- !u!1001 &9121946942508059709
 PrefabInstance:
   m_ObjectHideFlags: 0
