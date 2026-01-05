@@ -8,27 +8,20 @@ public class FleetUIManager : MonoBehaviour
 {
     public static FleetUIManager Instance;
 
-    [Header("Backend Configuration")]
+    [Header("Backend")]
     public string apiBaseUrl = "http://localhost:5101"; 
 
-    [Header("Interaction State")]
-    public int targetSlotId = 0; // The "Intent"
+    // REMOVED: public int targetSlotId; (Legacy)
 
-    [Header("Panel References")]
-    public GameObject fleetViewPanel;   
-    public GameObject detailViewPanel;  
-    
-    [Header("Grid Components")]
-    public Transform gridContainer;     
-    public GameObject droneCardPrefab;  
-
-    [Header("Detail View Connection")]
+    [Header("References")]
+    public GameObject fleetViewPanel;
+    public GameObject detailViewPanel;
+    public Transform gridContainer;
+    public GameObject droneCardPrefab;
     public DroneTelemetryController detailController; 
     public TextMeshProUGUI detailHeader;
 
     private Dictionary<string, DroneCardUI> activeCards = new Dictionary<string, DroneCardUI>();
-
-    // ❌ REMOVED: private string selectedDroneId; (Obsolete)
 
     void Awake()
     {
@@ -38,7 +31,22 @@ public class FleetUIManager : MonoBehaviour
         ShowFleetView();
     }
 
-    void Start() => StartCoroutine(FetchDroneList());
+    void Start()
+    {
+        StartCoroutine(FetchDroneList());
+        
+        // Listen to Active Slot changes to update the header text
+        if (SelectionManager.Instance != null)
+        {
+            SelectionManager.Instance.OnActiveSlotChanged += UpdateHeaderContext;
+        }
+    }
+    
+    void OnDestroy()
+    {
+        if (SelectionManager.Instance != null)
+            SelectionManager.Instance.OnActiveSlotChanged -= UpdateHeaderContext;
+    }
 
     IEnumerator FetchDroneList()
     {
@@ -93,30 +101,38 @@ public class FleetUIManager : MonoBehaviour
         }
     }
 
-    // --- NAVIGATION ---
-
-    public void ShowFleetViewForSlot(int slotId)
-    {
-        targetSlotId = slotId;
-        Debug.Log($"👆 UI Intent: Picking drone for Slot {slotId}");
-        
-        ShowFleetView();
-        if (detailHeader) detailHeader.text = "SELECT DRONE...";
-    }
+    // --- UPDATED NAVIGATION ---
 
     public void ShowFleetView()
     {
         if(fleetViewPanel) fleetViewPanel.SetActive(true);
         if(detailViewPanel) detailViewPanel.SetActive(false);
+        
+        // Update header so user knows what they are picking for
+        if (SelectionManager.Instance != null)
+            UpdateHeaderContext(SelectionManager.Instance.ActiveSlotId);
     }
 
     public void ShowDroneDetail()
     {
         if(fleetViewPanel) fleetViewPanel.SetActive(false);
         if(detailViewPanel) detailViewPanel.SetActive(true);
+    }
 
-        // Update header using the System State
-        string currentId = SelectionManager.Instance.GetDroneAtSlot(0);
-        if (detailHeader) detailHeader.text = $"COMMAND: {currentId ?? "NONE"}";
+    void UpdateHeaderContext(int slotId)
+    {
+        if (detailHeader) 
+            detailHeader.text = $"SELECT DRONE FOR SLOT {slotId}";
+    }
+
+    // DEBUG: Right-click component in Inspector to test UI without backend
+    [ContextMenu("Test: Add Fake Drone")]
+    public void TestAddFakeDrone()
+    {
+        DroneSnapshotModel fake = new DroneSnapshotModel();
+        fake.droneId = "Sim-" + Random.Range(100, 999);
+        fake.model = "Debug-X1";
+        fake.telemetry = new DroneSnapshotTelemetry { batteryLevel = 50, isFlying = true, online = true };
+        CreateOrUpdateCard(fake);
     }
 }

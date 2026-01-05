@@ -30,13 +30,10 @@ public class MapMarkerUI : MonoBehaviour
     {
         Debug.LogWarning($"🗺️ Map Clicked: {myDroneId}");
 
-        // 1. Get Intent (Which slot are we filling?)
-        int targetSlot = FleetUIManager.Instance.targetSlotId;
+        // 1. Use System Logic (Active Slot)
+        SelectionManager.Instance.AssignDroneToActiveSlot(myDroneId);
 
-        // 2. Update System State
-        SelectionManager.Instance.SetDroneAtSlot(targetSlot, myDroneId);
-
-        // 3. Optional: Navigate to Detail View
+        // 2. Optional: Navigate to Detail View
         FleetUIManager.Instance.ShowDroneDetail();
     }
 }

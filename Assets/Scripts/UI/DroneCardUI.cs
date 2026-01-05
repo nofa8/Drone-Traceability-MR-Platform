@@ -49,14 +49,15 @@ public class DroneCardUI : MonoBehaviour
     // The Logic: Set Intent -> Update State -> Navigate
     void OnClick()
     {
-        // 1. Get Intent (Which slot are we filling?)
-        int targetSlot = FleetUIManager.Instance.targetSlotId;
+        // OLD: int target = FleetUIManager.Instance.targetSlotId;
+        // OLD: SelectionManager.Instance.SetDroneAtSlot(target, droneId);
 
-        // 2. Update System State (The Database)
-        SelectionManager.Instance.SetDroneAtSlot(targetSlot, this.droneId);
+        // NEW: Let the system handle it
+        SelectionManager.Instance.AssignDroneToActiveSlot(this.droneId);
         
-        // 3. Navigate
-        FleetUIManager.Instance.ShowDroneDetail();
+        // Navigation
+        // FleetUIManager.Instance.ShowDroneDetail(); // Removed automatic nav to keep flow fluid or uncomment if desired
+        FleetUIManager.Instance.ShowDroneDetail(); 
     }
 
     // --- VISUAL FEEDBACK (Fixing the Event Handler) ---

@@ -1,20 +1,24 @@
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro; // Needed for text updates
+using TMPro;
 
 public class HandMenuController : MonoBehaviour
 {
     [Header("References")]
     public Transform headCamera;
     public GameObject menuContent;
-    public TextMeshProUGUI activeDroneText; // Optional: To show "Monitoring: RD001"
+    public TextMeshProUGUI activeDroneText; 
     
     [Header("Buttons")]
-    public Button dashboardBtn; // ✅ Added missing field
-    // public Button mapBtn;
+    public Button dashboardBtn; 
+
+    [Header("Slot Controls")]
+    public Button addSlotBtn;
+    public Button slot0Btn; 
+    public Button slot1Btn;
 
     [Header("Context")]
-    public int contextSlotId = 0; // Which slot does this menu control?
+    public int contextSlotId = 0; // The slot this menu represents
 
     [Header("Settings")]
     public float openThreshold = 0.80f; 
@@ -28,20 +32,31 @@ public class HandMenuController : MonoBehaviour
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSlotChanged;
 
-        // Wire up the button
+        // Wire up the Dashboard Button
         if(dashboardBtn) 
         {
             dashboardBtn.onClick.AddListener(() => {
                 // 1. Open the Panel
                 PanelManager.Instance.TogglePanel("Dashboard");
                 
-                // 2. Set Intent: We are looking at Slot 0
-                if (FleetUIManager.Instance != null)
+                // 2. Set Intent: Set the System Focus to this menu's slot
+                if (SelectionManager.Instance != null)
                 {
-                    FleetUIManager.Instance.targetSlotId = contextSlotId;
+                    // FIX: Use SetActiveSlot instead of the removed targetSlotId
+                    SelectionManager.Instance.SetActiveSlot(contextSlotId);
                 }
-            });
+            }); // FIX: Removed the extra }); here
         }
+        
+        // Wire up Slice Controls (For testing)
+        if (addSlotBtn) 
+            addSlotBtn.onClick.AddListener(() => SelectionManager.Instance.CreateSlot());
+
+        if (slot0Btn) 
+            slot0Btn.onClick.AddListener(() => SelectionManager.Instance.SetActiveSlot(0));
+
+        if (slot1Btn) 
+            slot1Btn.onClick.AddListener(() => SelectionManager.Instance.SetActiveSlot(1));
     }
 
     void OnDestroy()
@@ -50,10 +65,8 @@ public class HandMenuController : MonoBehaviour
             SelectionManager.Instance.OnSlotSelectionChanged -= HandleSlotChanged;
     }
 
-    // Update the menu text when the drone changes
     void HandleSlotChanged(int slotId, string droneId)
     {
-        // Only update if this event is for OUR slot
         if (slotId != contextSlotId) return;
 
         if (activeDroneText)
