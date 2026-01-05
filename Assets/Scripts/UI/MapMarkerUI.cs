@@ -13,7 +13,7 @@ public class MapMarkerUI : MonoBehaviour
         // 1. Get or Add Button Component
         btn = GetComponent<Button>();
         if (btn == null) {
-            Debug.LogWarning($"🗺️ Button Not Found for {droneId}");
+            //Debug.LogWarning($"🗺️ Button Not Found for {droneId}");
             btn = gameObject.AddComponent<Button>();
         }
 
@@ -28,7 +28,7 @@ public class MapMarkerUI : MonoBehaviour
 
     void OnMarkerClicked()
     {
-        Debug.LogWarning($"🗺️ Map Clicked: {myDroneId}");
+        //Debug.LogWarning($"🗺️ Map Clicked: {myDroneId}");
 
         // 1. Use System Logic (Active Slot)
         SelectionManager.Instance.AssignDroneToActiveSlot(myDroneId);

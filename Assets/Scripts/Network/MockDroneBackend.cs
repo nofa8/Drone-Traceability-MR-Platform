@@ -5,31 +5,39 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
 {
     [Header("Simulation Settings")]
     public string droneID = "SIM-001";
-    public float updateRate = 0.1f; // 10Hz, same as real drone
-    public float movementSpeed = 0.5f;
-    public float circleRadius = 5.0f; // 5 meters
+    public float updateRate = 0.1f; 
+    public float movementSpeed = 0.2f; // Slower speed (radians/sec)
+    
+    [Header("Flight Path")]
+    // 300m radius = nice big circle on your 1km map
+    public float circleRadiusMeters = 300.0f; 
+    
+    // Center of your Map (Leiria)
+    public double centerLat = 39.74362;
+    public double centerLon = -8.80705;
 
     // Events
     public event Action<DroneTelemetryData> OnTelemetryReceived;
 
-    // Internal State
     private bool isRunning = false;
     private float timer;
     private float startTime;
     private DroneTelemetryData currentData;
 
+    // Approx degrees per meter (at 40 deg lat)
+    private const double DegPerMeterLat = 1.0 / 111111.0; 
+    private const double DegPerMeterLon = 1.0 / (111111.0 * 0.766); // cos(40)
+
     void Awake()
     {
-        // Initialize with default empty data
         currentData = new DroneTelemetryData
         {
-            droneId = droneID, // FIX: id -> droneId
-            model = "DJI Mavic 3 (Sim)",
-            batteryLevel = 100.0, // FIX: batLvl -> batteryLevel
+            droneId = droneID,
+            model = "Sim-Test-Unit",
+            batteryLevel = 100.0,
             online = true,
-            satCount = 12,
             isFlying = true,
-            motorsOn = true // FIX: areMotorsOn -> motorsOn
+            motorsOn = true
         };
     }
 
@@ -37,13 +45,12 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
     {
         isRunning = true;
         startTime = Time.time;
-        Debug.Log("🟢 Mock Backend Started");
+        Debug.Log("🟢 Mock Backend Started (Map Mode)");
     }
 
     public void Disconnect()
     {
         isRunning = false;
-        Debug.Log("Pk Mock Backend Stopped");
     }
 
     void Update()
@@ -55,8 +62,11 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
         {
             SimulateFlight();
             
-            // 🔥 Push data to anyone listening (UI, 3D Model)
-            OnTelemetryReceived?.Invoke(currentData);
+            // 🛑 OLD: Only fired local event
+            // OnTelemetryReceived?.Invoke(currentData);
+            
+            // ✅ NEW: Push data to the Global System (Map & Dashboard)
+            DroneNetworkClient.SendMockTelemetry(currentData);
             
             timer = 0;
         }
@@ -66,31 +76,23 @@ public class MockDroneBackend : MonoBehaviour, IDroneDataSource
     {
         float time = Time.time - startTime;
 
-        // 1. FLY IN A CIRCLE (Physics Simulation)
+        // 1. Calculate Orbit
         float angle = time * movementSpeed;
+
+        // 2. Meters Offset (Circle)
+        double offsetX = Math.Cos(angle) * circleRadiusMeters;
+        double offsetZ = Math.Sin(angle) * circleRadiusMeters;
+
+        // 3. Convert to GPS
+        currentData.latitude = centerLat + (offsetZ * DegPerMeterLat);
+        currentData.longitude = centerLon + (offsetX * DegPerMeterLon);
+
+        // 4. Update Physics & Heading
+        currentData.heading = (angle * Mathf.Rad2Deg + 90) % 360; // Face tangent
+        currentData.altitude = 50.0; // Steady 50m height
         
-        // Calculate fake velocity
-        // FIX: velX/velZ -> velocityX/velocityZ
-        currentData.velocityX = Math.Cos(angle) * movementSpeed * circleRadius;
-        currentData.velocityZ = Math.Sin(angle) * movementSpeed * circleRadius; 
-        currentData.velocityY = 0; // FIX: velY -> velocityY
-
-        // Update Heading
-        float headingRad = Mathf.Atan2((float)currentData.velocityX, (float)currentData.velocityZ);
-        currentData.heading = headingRad * Mathf.Rad2Deg; // FIX: hdg -> heading
-
-        // Altitude
-        // FIX: alt -> altitude
-        currentData.altitude = 10.0 + Mathf.Sin(time * 0.5f) * 2.0f;
-
-        // 2. DRAIN BATTERY
-        // FIX: batLvl -> batteryLevel
-        currentData.batteryLevel -= 0.05f * Time.deltaTime; 
-        if (currentData.batteryLevel < 0) currentData.batteryLevel = 100;
-
-        // 3. UPDATE POSITION
-        // FIX: lat/lng -> latitude/longitude
-        currentData.latitude = 39.74362 + (Math.Sin(angle) * 0.0001); 
-        currentData.longitude = -8.80705 + (Math.Cos(angle) * 0.0001);
+        // (Optional) Fake Velocity for tilt
+        currentData.velocityX = Math.Cos(angle + Math.PI/2) * 10;
+        currentData.velocityZ = Math.Sin(angle + Math.PI/2) * 10;
     }
 }

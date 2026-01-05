@@ -167,4 +167,14 @@ public class DroneNetworkClient : MonoBehaviour
         cts?.Cancel();
         ws?.Dispose();
     }
+
+    public static void SendMockTelemetry(DroneTelemetryData data)
+    {
+        // 1. Send to Map
+        OnGlobalTelemetry?.Invoke(data);
+
+        // 2. Send to Dashboard (in case it's not subscribed to Global yet)
+        if (FleetUIManager.Instance != null)
+            FleetUIManager.Instance.HandleLiveUpdate(data);
+    }
 }

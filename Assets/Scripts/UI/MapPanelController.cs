@@ -1,20 +1,25 @@
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using System.Collections.Generic;
 
-public class MapPanelController : MonoBehaviour
+public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, IPointerDownHandler
 {
+    [Header("Debug")]
+    public bool debugMode = true;
+
     [Header("Configuration")]
     public RectTransform mapRect; 
     public GameObject markerPrefab; 
     public GameObject trailPrefab; 
 
-    [Header("GPS Bounds (Calibration)")]
-    public Vector2 topLeftGPS = new Vector2(39.7480f, -8.8130f);     
-    public Vector2 bottomRightGPS = new Vector2(39.7390f, -8.8010f); 
+    [Header("Dynamic Controls")]
+    public float zoomSensitivity = 0.1f;
+    public float minScale = 0.1f; 
+    public float maxScale = 50.0f;
 
     [Header("Slot Colors")]
-    public Color[] slotColors = new Color[] { Color.cyan, new Color(1f, 0.5f, 0f) }; // Slot 0 = Cyan, Slot 1 = Orange
+    public Color[] slotColors = new Color[] { Color.cyan, new Color(1f, 0.5f, 0f) };
     public Color unassignedColor = Color.white;
 
     // State
@@ -23,10 +28,10 @@ public class MapPanelController : MonoBehaviour
 
     void Start()
     {
+        // No local calibration anymore! We rely on GeoMapContext.
         if (SelectionManager.Instance != null)
-        {
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSelectionChanged;
-        }
+        
         DroneNetworkClient.OnGlobalTelemetry += HandleTelemetry;
     }
 
@@ -34,105 +39,128 @@ public class MapPanelController : MonoBehaviour
     {
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged -= HandleSelectionChanged;
-        
         DroneNetworkClient.OnGlobalTelemetry -= HandleTelemetry;
     }
 
+    // --- INTERACTION: ZOOM (Remote Control) ---
+    public void OnScroll(PointerEventData eventData)
+    {
+        if (!GeoMapContext.Instance) return;
+
+        float scrollDelta = eventData.scrollDelta.y;
+        if (Mathf.Abs(scrollDelta) < 0.01f) return;
+
+        float currentScale = GeoMapContext.Instance.pixelsPerMeter;
+        float newScale = currentScale;
+
+        if (scrollDelta > 0) newScale *= (1f + zoomSensitivity);
+        else newScale /= (1f + zoomSensitivity);
+
+        newScale = Mathf.Clamp(newScale, minScale, maxScale);
+
+        GeoMapContext.Instance.SetZoom(newScale);
+    }
+
+    // --- INTERACTION: PAN (Remote Control) ---
+    public void OnPointerDown(PointerEventData eventData) { }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        PanMap(eventData.delta);
+    }
+
+    private void PanMap(Vector2 deltaPixels)
+    {
+        if (!GeoMapContext.Instance) return;
+
+        float scale = GeoMapContext.Instance.pixelsPerMeter;
+        double lat = GeoMapContext.Instance.originLat;
+        double lon = GeoMapContext.Instance.originLon;
+
+        if (scale <= 0.001f) return;
+
+        float deltaMetersX = -deltaPixels.x / scale;
+        float deltaMetersY = -deltaPixels.y / scale;
+
+        Vector2 newCenter = GeoUtils.MetersToLatLon(
+            new Vector2(deltaMetersX, deltaMetersY), 
+            lat, 
+            lon
+        );
+
+        GeoMapContext.Instance.SetCenter(newCenter.x, newCenter.y);
+    }
+
+    // --- RENDERING ---
     void HandleTelemetry(DroneTelemetryData data)
     {
-        // 1. Calculate Normalized Position using RAW MATH (not InverseLerp which clamps to 0-1)
-        float rangeX = bottomRightGPS.y - topLeftGPS.y;
-        float normX = ((float)data.longitude - topLeftGPS.y) / rangeX;
-
-        float rangeY = topLeftGPS.x - bottomRightGPS.x;
-        float normY = ((float)data.latitude - bottomRightGPS.x) / rangeY;
-
-        // 2. STRICT BOUNDS CHECK
-        bool isInsideMap = (normX >= 0f && normX <= 1f && normY >= 0f && normY <= 1f);
-
-        // --- ENSURE OBJECTS EXIST ---
-        if (!markers.ContainsKey(data.droneId))
+        if (!GeoMapContext.Instance) 
         {
-            CreateMarkerAndTrail(data.droneId);
-        }
-
-        RectTransform marker = markers[data.droneId];
-        MapTrackRenderer trail = trails.ContainsKey(data.droneId) ? trails[data.droneId] : null;
-
-        // --- VISIBILITY ENFORCEMENT ---
-        if (!isInsideMap)
-        {
-            if (marker.gameObject.activeSelf) marker.gameObject.SetActive(false);
-            
-            if (trail != null)
-            {
-                if (trail.gameObject.activeSelf)
-                {
-                    trail.Clear();
-                    trail.gameObject.SetActive(false);
-                }
-            }
+            if(debugMode) Debug.LogWarning("⚠️ Missing GeoMapContext in scene!");
             return;
         }
 
-        // --- DRONE IS VISIBLE ---
+        // 1. Math (DELEGATED TO CONTEXT)
+        Vector2 localPos = GeoMapContext.Instance.GeoToScreenPosition(data.latitude, data.longitude);
+
+        // 2. Bounds Check (Simple UI check)
+        float halfW = mapRect.rect.width / 2f;
+        float halfH = mapRect.rect.height / 2f;
+        
+        bool isInside = (localPos.x >= -halfW && localPos.x <= halfW && 
+                         localPos.y >= -halfH && localPos.y <= halfH);
+
+        // 3. Object Management
+        if (!markers.ContainsKey(data.droneId)) CreateMarkerAndTrail(data.droneId);
+        
+        RectTransform marker = markers[data.droneId];
+        MapTrackRenderer trail = trails.ContainsKey(data.droneId) ? trails[data.droneId] : null;
+
+        if (!isInside)
+        {
+            if (marker.gameObject.activeSelf) marker.gameObject.SetActive(false);
+            if (trail != null) trail.gameObject.SetActive(false);
+            return;
+        }
+
         if (!marker.gameObject.activeSelf) marker.gameObject.SetActive(true);
         if (trail != null && !trail.gameObject.activeSelf) trail.gameObject.SetActive(true);
 
-        // 3. Position Calculation
-        float xPos = (normX - 0.5f) * mapRect.rect.width;
-        float yPos = (normY - 0.5f) * mapRect.rect.height;
-        Vector2 localPos = new Vector2(xPos, yPos);
-
-        // 4. Update Marker
+        // 4. Update Position
         marker.anchoredPosition = localPos;
         marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
 
-        // 5. Update Visuals (Slot-Based Coloring)
         UpdateVisuals(data.droneId);
-
-        // 6. Update Trail
-        if (trail != null)
-        {
-            trail.AddPoint(localPos);
-        }
+        if (trail != null) trail.AddPoint(localPos);
     }
 
+    // --- RESTORED HELPER FUNCTIONS ---
+    
     void CreateMarkerAndTrail(string id)
     {
-        // Marker
         GameObject newMarker = Instantiate(markerPrefab, mapRect);
         newMarker.transform.localPosition = Vector3.zero; 
         newMarker.transform.localScale = Vector3.one;
-        newMarker.transform.localPosition = new Vector3(newMarker.transform.localPosition.x, newMarker.transform.localPosition.y, 0);
-        
         newMarker.AddComponent<MapMarkerUI>().Setup(id);
         markers.Add(id, newMarker.GetComponent<RectTransform>());
 
-        // Trail
-        if (trailPrefab != null)
-        {
+        if (trailPrefab != null) {
             GameObject newTrail = Instantiate(trailPrefab, mapRect);
-            newTrail.transform.localPosition = Vector3.zero;
+            newTrail.transform.localPosition = Vector3.zero; 
             newTrail.transform.localScale = Vector3.one;
             newTrail.transform.SetAsFirstSibling();
             
             MapTrackRenderer tr = newTrail.GetComponent<MapTrackRenderer>();
-            tr.Setup(unassignedColor); // Start with unassigned color
+            tr.Setup(unassignedColor);
             trails.Add(id, tr);
         }
     }
 
     void HandleSelectionChanged(int slotId, string droneId)
     {
-        // When assignment changes, refresh visuals for ALL drones
-        foreach(var id in markers.Keys)
-        {
-            UpdateVisuals(id);
-        }
+        foreach(var id in markers.Keys) UpdateVisuals(id);
     }
 
-    // Centralized Visual Logic - Slot-Based Coloring
     void UpdateVisuals(string droneId)
     {
         if (!markers.ContainsKey(droneId)) return;
@@ -140,37 +168,26 @@ public class MapPanelController : MonoBehaviour
         RectTransform marker = markers[droneId];
         Image img = marker.GetComponent<Image>();
         
-        // Ask the Brain: "Which slot owns this drone?"
         int ownerSlot = -1;
-        if (SelectionManager.Instance != null)
-        {
+        if (SelectionManager.Instance != null) 
             ownerSlot = SelectionManager.Instance.GetSlotForDrone(droneId);
-        }
 
-        // Determine Color based on slot ownership
         Color targetColor = unassignedColor;
         float scale = 1.0f;
 
         if (ownerSlot != -1)
         {
-            // Assigned to a slot - use that slot's color
-            if (ownerSlot < slotColors.Length) 
-                targetColor = slotColors[ownerSlot];
-            else 
-                targetColor = Color.magenta; // Fallback for unknown slots
-
-            scale = 1.5f; // Assigned drones are bigger
+            if (ownerSlot < slotColors.Length) targetColor = slotColors[ownerSlot];
+            else targetColor = Color.magenta;
+            scale = 1.5f;
         }
 
-        // Apply to Marker
         if (img) img.color = targetColor;
         marker.localScale = Vector3.one * scale;
-        if (ownerSlot != -1) marker.SetAsLastSibling(); // Assigned drones on top
-
-        // Apply to Trail (Sync color)
-        if (trails.ContainsKey(droneId))
-        {
+        
+        if (ownerSlot != -1) marker.SetAsLastSibling();
+        
+        if (trails.ContainsKey(droneId)) 
             trails[droneId].SetColor(targetColor);
-        }
     }
 }
