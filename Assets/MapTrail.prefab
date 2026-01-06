@@ -154,5 +154,5 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MapTrackRenderer
   lineRenderer: {fileID: 6951466991918037403}
-  maxPoints: 75
-  minDistance: 5
+  maxPoints: 50
+  minDistance: 1

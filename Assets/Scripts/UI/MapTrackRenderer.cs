@@ -5,12 +5,11 @@ public class MapTrackRenderer : MonoBehaviour
 {
     public LineRenderer lineRenderer;
     public int maxPoints = 100; 
-    
-    // Lower threshold (0.5 pixel) to catch slow movement immediately
-    public float minDistance = 0.5f; 
+    public float minDistanceMeters = 2.0f; // Store points every 2 meters
 
-    private Queue<Vector2> points = new Queue<Vector2>();
-    private Vector2 lastPoint;
+    // STORE GPS, NOT PIXELS
+    private Queue<Vector2> gpsPoints = new Queue<Vector2>(); 
+    private Vector2 lastGpsPoint;
 
     public void Setup(Color color)
     {
@@ -19,49 +18,54 @@ public class MapTrackRenderer : MonoBehaviour
             lineRenderer.startColor = color;
             lineRenderer.endColor = new Color(color.r, color.g, color.b, 0.0f);
             lineRenderer.positionCount = 0;
-            
             lineRenderer.useWorldSpace = false;
             lineRenderer.alignment = LineAlignment.TransformZ;
-            
-            // Force width in code (20 pixels) to prevent "Invisible Thin Line"
-            lineRenderer.widthMultiplier = 20.0f; 
+            lineRenderer.widthMultiplier = 15.0f; // Good visibility width
         }
     }
 
-    public void AddPoint(Vector2 localPos)
+    public void AddGpsPoint(double lat, double lon)
     {
         if (!lineRenderer) return;
 
-        // Optimization: Filter out jitter, but allow small moves
-        if (points.Count > 0 && Vector2.Distance(localPos, lastPoint) < minDistance)
+        Vector2 newGps = new Vector2((float)lat, (float)lon);
+
+        // Optimization: Check distance in METERS, not pixels
+        if (gpsPoints.Count > 0 && GeoUtils.DistanceMeters(newGps, lastGpsPoint) < minDistanceMeters)
             return;
 
-        points.Enqueue(localPos);
-        if (points.Count > maxPoints)
-            points.Dequeue();
+        gpsPoints.Enqueue(newGps);
+        if (gpsPoints.Count > maxPoints)
+            gpsPoints.Dequeue();
 
-        lastPoint = localPos;
-        UpdateLine();
+        lastGpsPoint = newGps;
+        
+        // Draw immediately
+        Refresh();
     }
 
-    private void UpdateLine()
+    // Called by MapPanelController when the map Zooms/Pans
+    public void Refresh()
     {
-        if (lineRenderer == null) return;
+        if (!lineRenderer || !GeoMapContext.Instance) return;
 
-        lineRenderer.positionCount = points.Count;
+        lineRenderer.positionCount = gpsPoints.Count;
         int i = 0;
         
-        foreach (Vector2 p in points)
+        foreach (Vector2 gps in gpsPoints)
         {
-            // Push Z to -5.0f to guarantee it sits above the map image
-            lineRenderer.SetPosition(i, new Vector3(p.x, p.y, -2.5f)); 
+            // KEY FIX: Re-calculate screen position based on CURRENT map state
+            Vector2 screenPos = GeoMapContext.Instance.GeoToScreenPosition(gps.x, gps.y);
+            
+            // Z = -2.5f to ensure it draws on top of map but below marker
+            lineRenderer.SetPosition(i, new Vector3(screenPos.x, screenPos.y, -2.5f)); 
             i++;
         }
     }
 
     public void Clear()
     {
-        points.Clear();
+        gpsPoints.Clear();
         if (lineRenderer) lineRenderer.positionCount = 0;
     }
 
