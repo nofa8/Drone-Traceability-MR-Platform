@@ -10,14 +10,15 @@ public class GeoMapContext : MonoBehaviour
     public double originLon;
 
     [Header("Scale State")]
-    public float pixelsPerMeter = 1.0f; // Zoom level
+    public float pixelsPerMeter = 1.0f; // 1.0 means 1 meter = 1 pixel
     
-    // Events for when the map moves/zooms
+    // Events: "The world moved"
     public event Action OnMapUpdated;
 
     void Awake()
     {
-        Instance = this;
+        if (Instance == null) Instance = this;
+        else Destroy(gameObject);
     }
 
     public void SetCenter(double lat, double lon)
@@ -33,20 +34,18 @@ public class GeoMapContext : MonoBehaviour
         OnMapUpdated?.Invoke();
     }
 
-    // The "Contract": Convert Lat/Lon to Local UI Pixels
+    // --- THE CONTRACT ---
+
+    // Converts Real World Lat/Lon -> UI Pixels (Relative to Center)
     public Vector2 GeoToScreenPosition(double lat, double lon)
     {
-        // 1. Get distance in meters from center
         Vector2 meters = GeoUtils.LatLonToMeters(lat, lon, originLat, originLon);
-        
-        // 2. Scale to pixels
         return meters * pixelsPerMeter;
     }
-    
-    // Reverse "Contract": Screen Pixels to Lat/Lon (for Panning)
+
+    // Converts Screen Drag -> Real World Change (For Panning)
     public Vector2 ScreenToGeoPosition(Vector2 screenDelta)
     {
-         // Convert pixels -> meters -> Lat/Lon
          Vector2 meters = screenDelta / pixelsPerMeter;
          return GeoUtils.MetersToLatLon(meters, originLat, originLon);
     }

@@ -13,7 +13,7 @@ public class DroneNetworkClient : MonoBehaviour
 
     [Header("Connection Settings")]
     [Tooltip("Use PC IP (e.g. 192.168.1.5) if on Quest")]
-    public string serverUrl = "ws://192.168.1.64:5101"; 
+    public string serverUrl = "ws://192.168.1.64:5102"; 
     public string droneID = "RD001";
     public bool autoReconnect = true;
 
@@ -42,7 +42,7 @@ public class DroneNetworkClient : MonoBehaviour
                 cts = new CancellationTokenSource();
 
                 string myClientID = "Dash-" + UnityEngine.Random.Range(1000, 9999);
-                Uri uri = new Uri($"{serverUrl}/ws?dboidsID={myClientID}&role=monitor");
+                Uri uri = new Uri($"{serverUrl}");
 
                 Debug.Log($"⏳ Connecting to {uri}...");
                 await ws.ConnectAsync(uri, cts.Token);
