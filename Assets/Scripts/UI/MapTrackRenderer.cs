@@ -5,9 +5,9 @@ public class MapTrackRenderer : MonoBehaviour
 {
     public LineRenderer lineRenderer;
     public int maxPoints = 100; 
-    public float minDistanceMeters = 2.0f; // Store points every 2 meters
+    public float minDistanceMeters = 2.0f; // Store points based on real distance
 
-    // STORE GPS, NOT PIXELS
+    // STORE GPS (Lat/Lon), NOT PIXELS
     private Queue<Vector2> gpsPoints = new Queue<Vector2>(); 
     private Vector2 lastGpsPoint;
 
@@ -20,17 +20,18 @@ public class MapTrackRenderer : MonoBehaviour
             lineRenderer.positionCount = 0;
             lineRenderer.useWorldSpace = false;
             lineRenderer.alignment = LineAlignment.TransformZ;
-            lineRenderer.widthMultiplier = 15.0f; // Good visibility width
+            lineRenderer.widthMultiplier = 20.0f; 
         }
     }
 
+    // Called whenever new Telemetry arrives
     public void AddGpsPoint(double lat, double lon)
     {
         if (!lineRenderer) return;
 
         Vector2 newGps = new Vector2((float)lat, (float)lon);
 
-        // Optimization: Check distance in METERS, not pixels
+        // Optimization: Filter out jitter using meters
         if (gpsPoints.Count > 0 && GeoUtils.DistanceMeters(newGps, lastGpsPoint) < minDistanceMeters)
             return;
 
@@ -54,10 +55,10 @@ public class MapTrackRenderer : MonoBehaviour
         
         foreach (Vector2 gps in gpsPoints)
         {
-            // KEY FIX: Re-calculate screen position based on CURRENT map state
+            // Ask GeoMapContext for the CURRENT screen pixel position
             Vector2 screenPos = GeoMapContext.Instance.GeoToScreenPosition(gps.x, gps.y);
             
-            // Z = -2.5f to ensure it draws on top of map but below marker
+            // Z = -2.5f ensures it draws above the map
             lineRenderer.SetPosition(i, new Vector3(screenPos.x, screenPos.y, -2.5f)); 
             i++;
         }

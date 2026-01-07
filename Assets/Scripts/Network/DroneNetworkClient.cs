@@ -177,4 +177,58 @@ public class DroneNetworkClient : MonoBehaviour
         if (FleetUIManager.Instance != null)
             FleetUIManager.Instance.HandleLiveUpdate(data);
     }
+
+
+
+    public async void SendCommand(string droneId, string commandType)
+    {
+        // 1. Create the Payload
+        WS_CommandEvent cmd = new WS_CommandEvent
+        {
+            droneId = droneId,
+            command = commandType
+        };
+
+        string json = JsonUtility.ToJson(cmd);
+
+        // 2. Send via WebSocket (if connected)
+        if (ws != null && ws.State == WebSocketState.Open)
+        {
+            try
+            {
+                ArraySegment<byte> bytesToSend = new ArraySegment<byte>(Encoding.UTF8.GetBytes(json));
+                await ws.SendAsync(bytesToSend, WebSocketMessageType.Text, true, cts.Token);
+                Debug.Log($"🚀 Sent Command: {commandType} to {droneId}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"❌ Send Failed: {e.Message}");
+            }
+        }
+        else
+        {
+            // Fallback for Debugging/Offline Mode
+            Debug.Log($"⚠️ [Offline Mode] Pretending to send: {json}");
+        }
+    }
+
+    public static void SendCommandGlobal(string commandType)
+    {
+        // Find the active drone
+        if (SelectionManager.Instance == null) return;
+        string droneId = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
+
+        if (string.IsNullOrEmpty(droneId)) 
+        {
+            Debug.LogWarning("❌ Cannot send command: No Drone Selected!");
+            return;
+        }
+
+        // Find the client instance and send
+        DroneNetworkClient client = FindObjectOfType<DroneNetworkClient>();
+        if (client != null)
+        {
+            client.SendCommand(droneId, commandType);
+        }
+    }
 }

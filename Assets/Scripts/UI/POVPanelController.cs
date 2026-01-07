@@ -2,77 +2,48 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-[RequireComponent(typeof(AspectRatioFitter))] 
+[RequireComponent(typeof(AspectRatioFitter))]
 public class POVPanelController : MonoBehaviour
 {
-    [Header("Configuration")]
-    [Tooltip("-1 = Follow Active Slot. 0, 1 = Lock to specific slot.")]
-    public int boundSlotId = -1;
+    // Static instance is still useful, but not critical anymore
+    public static POVPanelController Instance; 
 
     [Header("UI Components")]
-    public RawImage videoDisplay;      // The Screen
-    public TextMeshProUGUI statusText; // "LIVE", "NO SIGNAL"
-    public Image recordingIcon;        // Red dot (optional)
+    public RawImage videoDisplay;      
+    public TextMeshProUGUI statusText; 
+    public Image recordingIcon;        
 
-    [Header("Simulation Source (Fallback)")]
-    public Texture offlinePlaceholder; // Static/Noise image
-    public RenderTexture simulatedFeed; // The cable from Step 1
+    [Header("Defaults")]
+    public Texture offlinePlaceholder; 
+    public Color noSignalColor = Color.gray;
 
     private AspectRatioFitter ratioFitter;
-    private int currentTargetSlot = -1;
 
     void Awake()
     {
+        Instance = this;
         ratioFitter = GetComponent<AspectRatioFitter>();
-        // Default to Fit Inside Parent (so we don't stretch weirdly)
         if (ratioFitter) ratioFitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
     }
 
+    // 🔥 THIS IS THE FIX
     void OnEnable()
     {
-        // 1. Subscribe to Slot Changes
-        if (SelectionManager.Instance != null)
+        // 1. Check if the receiver is already running a stream
+        if (MockVideoReceiver.Instance != null)
         {
-            if (boundSlotId == -1)
+            // Subscribe for future updates
+            MockVideoReceiver.Instance.OnStreamUpdated += HandleStreamUpdate;
+
+            // Grab the CURRENT stream immediately (in case it started while we were closed)
+            if (MockVideoReceiver.Instance.CurrentFeed != null)
             {
-                SelectionManager.Instance.OnActiveSlotChanged += RefreshConnection;
-                RefreshConnection(SelectionManager.Instance.ActiveSlotId);
+                HandleStreamUpdate(MockVideoReceiver.Instance.CurrentFeed);
             }
             else
             {
-                RefreshConnection(boundSlotId);
+                Disconnect();
             }
-        }
-        else
-        {
-            RefreshConnection(0); // Fallback
-        }
-    }
-
-    void OnDisable()
-    {
-        if (SelectionManager.Instance != null && boundSlotId == -1)
-        {
-            SelectionManager.Instance.OnActiveSlotChanged -= RefreshConnection;
-        }
-        Disconnect();
-    }
-
-    // --- LOGIC: CONNECTION ---
-
-    void RefreshConnection(int slotId)
-    {
-        currentTargetSlot = slotId;
-
-        // PHASE 5: MOCK LOGIC
-        // In the future, this is where you ask "GetWebRTCFeedFor(slotId)"
-        // For now, we check if the slot has a drone, and show the Sim Feed.
-        
-        string droneId = SelectionManager.Instance ? SelectionManager.Instance.GetDroneAtSlot(slotId) : null;
-
-        if (!string.IsNullOrEmpty(droneId))
-        {
-            ConnectToMockStream();
         }
         else
         {
@@ -80,38 +51,31 @@ public class POVPanelController : MonoBehaviour
         }
     }
 
-    void ConnectToMockStream()
+    void OnDisable()
     {
-        if (simulatedFeed != null)
+        // Clean up subscription so we don't get errors when closed
+        if (MockVideoReceiver.Instance != null)
         {
-            //Debug.Log($"🎥 POV (Slot {currentTargetSlot}): Connected to Simulated Feed");
-            SetVideoTexture(simulatedFeed);
-        }
-        else
-        {
-            Debug.LogWarning("⚠️ POV: No Simulated Feed assigned!");
-            SetStatus("NO SOURCE", false);
+            MockVideoReceiver.Instance.OnStreamUpdated -= HandleStreamUpdate;
         }
     }
 
-    public void Disconnect()
+    // Event Handler
+    void HandleStreamUpdate(Texture newFeed)
     {
-        if (videoDisplay != null)
-        {
-            videoDisplay.texture = offlinePlaceholder;
-        }
-        SetStatus("OFFLINE", false);
+        if (newFeed != null) SetVideoTexture(newFeed);
+        else Disconnect();
     }
 
-    // --- PUBLIC API (WebRTC Entry Point) ---
+    // --- VISUAL LOGIC ---
 
     public void SetVideoTexture(Texture newFeed)
     {
         if (videoDisplay != null && newFeed != null)
         {
             videoDisplay.texture = newFeed;
+            videoDisplay.color = Color.white; 
             
-            // Auto-adjust Aspect Ratio
             if (ratioFitter != null)
             {
                 float ratio = (float)newFeed.width / newFeed.height;
@@ -120,6 +84,24 @@ public class POVPanelController : MonoBehaviour
 
             SetStatus("LIVE FEED", true);
         }
+    }
+
+    public void Disconnect()
+    {
+        if (videoDisplay != null)
+        {
+            if (offlinePlaceholder != null)
+            {
+                videoDisplay.texture = offlinePlaceholder;
+                videoDisplay.color = Color.white;
+            }
+            else
+            {
+                videoDisplay.texture = null;
+                videoDisplay.color = noSignalColor;
+            }
+        }
+        SetStatus("NO SIGNAL", false);
     }
 
     private void SetStatus(string text, bool active)

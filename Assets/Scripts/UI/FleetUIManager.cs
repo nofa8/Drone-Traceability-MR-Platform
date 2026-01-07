@@ -64,7 +64,7 @@ public class FleetUIManager : MonoBehaviour
             }
             else
             {
-                if (detailHeader) detailHeader.text = $"MONITORING: {droneId}";
+                if (detailHeader) detailHeader.text = $"{droneId}";
             }
         }
     }
@@ -73,7 +73,23 @@ public class FleetUIManager : MonoBehaviour
     void UpdateHeaderContext(int slotId)
     {
         if (detailHeader) 
-            detailHeader.text = $"SELECT DRONE FOR SLOT {slotId}";
+        {
+            // 1. Get the ID currently assigned to this slot
+            string droneId = SelectionManager.Instance != null ? 
+                             SelectionManager.Instance.GetDroneAtSlot(slotId) : null;
+
+            // 2. Set the text
+            if (string.IsNullOrEmpty(droneId))
+            {
+                detailHeader.text = "NO DRONE SELECTED";
+            }
+            else
+            {
+                // Displays just the ID (e.g., "RD001")
+                detailHeader.text = droneId; 
+
+            }
+        }
     }
 
     IEnumerator FetchDroneList()
@@ -147,7 +163,7 @@ public class FleetUIManager : MonoBehaviour
         string currentDrone = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
         if (!string.IsNullOrEmpty(currentDrone))
         {
-             if (detailHeader) detailHeader.text = $"MONITORING: {currentDrone}";
+             if (detailHeader) detailHeader.text = $"{currentDrone}";
         }
     }
 

@@ -69,3 +69,12 @@ public class WS_EventProbe
 {
     public string eventType;
 }
+
+
+[Serializable]
+public class WS_CommandEvent
+{
+    public string eventType = "Command";
+    public string droneId;
+    public string command; // e.g. "ARM", "DISARM", "LAND", "RTL"
+}

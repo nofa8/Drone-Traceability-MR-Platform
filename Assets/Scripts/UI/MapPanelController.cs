@@ -52,7 +52,7 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
             GeoMapContext.Instance.OnMapUpdated -= ReDrawAllMarkers;
     }
 
-    // --- INPUT HANDLERS ---
+    // --- INPUT HANDLERS (Zoom/Pan) ---
 
     public void OnPointerDown(PointerEventData eventData)
     {
@@ -75,7 +75,7 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         if (activeTouches.ContainsKey(eventData.pointerId))
             activeTouches[eventData.pointerId] = eventData.position;
 
-        // MODE A: PINCH (Zoom)
+        // MODE A: ZOOM (Pinch)
         if (activeTouches.Count >= 2)
         {
             var ids = new List<int>(activeTouches.Keys);
@@ -85,13 +85,14 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
             else
             {
                 float delta = currentDistance - previousTouchDistance;
-                if (Mathf.Abs(delta * 0.01f) > 0.001f)
+                float zoomFactor = delta * 0.01f; 
+                if (Mathf.Abs(zoomFactor) > 0.001f)
                 {
-                    ApplyZoom(delta * 0.01f);
+                    ApplyZoom(zoomFactor);
                     previousTouchDistance = currentDistance;
                 }
             }
-            return;
+            return; 
         }
 
         // MODE B: PAN (1 Finger)
@@ -109,30 +110,30 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
             ApplyZoom(scrollDelta > 0 ? zoomSensitivity : -zoomSensitivity);
     }
 
-    // --- LOGIC ---
+    // --- LOGIC: MAP MANIPULATION ---
 
     private void ApplyZoom(float delta)
     {
         if (!GeoMapContext.Instance) return;
+
         float currentScale = GeoMapContext.Instance.pixelsPerMeter;
         float newScale = currentScale;
+        float strength = Mathf.Abs(delta);
 
-        if (delta > 0) newScale *= (1f + Mathf.Abs(delta));
-        else newScale /= (1f + Mathf.Abs(delta));
+        if (delta > 0) newScale *= (1f + strength);
+        else newScale /= (1f + strength);
 
         newScale = Mathf.Clamp(newScale, minScale, maxScale);
-        GeoMapContext.Instance.SetZoom(newScale);
+        GeoMapContext.Instance.SetZoom(newScale); 
     }
 
     private void PanMap(Vector2 deltaPixels)
     {
         if (!GeoMapContext.Instance) return;
-        
-        // Stop following drone if user interacts
-        GeoMapContext.Instance.SetFreeMode();
-
         float scale = GeoMapContext.Instance.pixelsPerMeter;
         if (scale <= 0.001f) return;
+
+        GeoMapContext.Instance.SetFreeMode(); // Stop following drone
 
         float deltaMetersX = -deltaPixels.x / scale;
         float deltaMetersY = -deltaPixels.y / scale;
@@ -145,62 +146,64 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
 
     void ReDrawAllMarkers()
     {
-        // 1. Redraw Markers (Pass FALSE so we don't add duplicate trail points)
+        // 1. Redraw Markers (without adding new points to trail)
         foreach (var kvp in cachedTelemetry)
         {
             UpdateMarkerPosition(kvp.Value, false); 
         }
-
-        // 2. Refresh Trails (Recalculate GPS to Screen for the new Zoom level)
-        foreach (var trail in trails.Values)
-        {
-            trail.Refresh(); 
-        }
+        // 2. Refresh Trails (Recalculate GPS -> Pixels)
+        foreach(var trail in trails.Values) trail.Refresh();
     }
 
     void HandleTelemetry(DroneTelemetryData data)
     {
-        if (!cachedTelemetry.ContainsKey(data.droneId))
-            cachedTelemetry.Add(data.droneId, data);
-        else
-            cachedTelemetry[data.droneId] = data;
+        if (!cachedTelemetry.ContainsKey(data.droneId)) cachedTelemetry.Add(data.droneId, data);
+        else cachedTelemetry[data.droneId] = data;
 
-        // Pass TRUE because this is new data, so we want to add to history
-        UpdateMarkerPosition(data, true); 
+        UpdateMarkerPosition(data, true);
     }
 
-    // FIX: Added 'bool updateTrail' parameter to prevent duplicates during Redraw
+    // 🔥 THE MANUAL BOUNDS CHECK (Code Mask)
     void UpdateMarkerPosition(DroneTelemetryData data, bool updateTrail)
     {
         if (!GeoMapContext.Instance) return;
 
+        // 1. Calculate Screen Position
         Vector2 localPos = GeoMapContext.Instance.GeoToScreenPosition(data.latitude, data.longitude);
 
+        // 2. Ensure Marker Exists
         if (!markers.ContainsKey(data.droneId)) CreateMarkerAndTrail(data.droneId);
         
         RectTransform marker = markers[data.droneId];
         MapTrackRenderer trail = trails.ContainsKey(data.droneId) ? trails[data.droneId] : null;
 
+        // 3. BOUNDS CHECK: Is the point inside the visible map area?
         float halfW = mapRect.rect.width / 2f;
         float halfH = mapRect.rect.height / 2f;
-        bool isInside = (localPos.x >= -halfW && localPos.x <= halfW && localPos.y >= -halfH && localPos.y <= halfH);
+        float buffer = 10f; // Small buffer to prevent popping at edge
 
-        if (!isInside)
+        bool isInside = (localPos.x >= -(halfW + buffer) && localPos.x <= (halfW + buffer) && 
+                         localPos.y >= -(halfH + buffer) && localPos.y <= (halfH + buffer));
+
+        // 4. Toggle Marker Visibility
+        if (marker.gameObject.activeSelf != isInside) 
+            marker.gameObject.SetActive(isInside);
+
+        // 5. Toggle Trail Visibility (UPDATED LOGIC)
+        // Now we hide the trail if the drone is off-screen.
+        if (trail != null)
         {
-            if (marker.gameObject.activeSelf) marker.gameObject.SetActive(false);
-            if (trail != null) trail.gameObject.SetActive(false);
-            return;
+            if (trail.gameObject.activeSelf != isInside)
+                trail.gameObject.SetActive(isInside);
         }
 
-        if (!marker.gameObject.activeSelf) marker.gameObject.SetActive(true);
-        if (trail != null && !trail.gameObject.activeSelf) trail.gameObject.SetActive(true);
-
+        // 6. Apply Position (Even if hidden, so it's ready when it comes back)
         marker.anchoredPosition = localPos;
         marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
 
-        UpdateVisuals(data.droneId);
+        if (isInside) UpdateVisuals(data.droneId);
         
-        // FIX: Use AddGpsPoint (Lat/Lon) instead of AddPoint (Pixels)
+        // 7. Update Trail (Always add GPS point so we don't lose history while hidden)
         if (trail != null && updateTrail) 
         {
             trail.AddGpsPoint(data.latitude, data.longitude);
@@ -210,15 +213,13 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
     void CreateMarkerAndTrail(string id)
     {
         GameObject newMarker = Instantiate(markerPrefab, mapRect);
-        newMarker.transform.localPosition = Vector3.zero; 
-        newMarker.transform.localScale = Vector3.one;
+        newMarker.transform.localPosition = Vector3.zero; newMarker.transform.localScale = Vector3.one;
         newMarker.AddComponent<MapMarkerUI>().Setup(id);
         markers.Add(id, newMarker.GetComponent<RectTransform>());
 
         if (trailPrefab != null) {
             GameObject newTrail = Instantiate(trailPrefab, mapRect);
-            newTrail.transform.localPosition = Vector3.zero; 
-            newTrail.transform.localScale = Vector3.one;
+            newTrail.transform.localPosition = Vector3.zero; newTrail.transform.localScale = Vector3.one;
             newTrail.transform.SetAsFirstSibling();
             MapTrackRenderer tr = newTrail.GetComponent<MapTrackRenderer>();
             tr.Setup(unassignedColor);
@@ -233,6 +234,7 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         if (!markers.ContainsKey(droneId)) return;
         RectTransform marker = markers[droneId];
         Image img = marker.GetComponent<Image>();
+        
         int ownerSlot = -1;
         if (SelectionManager.Instance != null) ownerSlot = SelectionManager.Instance.GetSlotForDrone(droneId);
 
