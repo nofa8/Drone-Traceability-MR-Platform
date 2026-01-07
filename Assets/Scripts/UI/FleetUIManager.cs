@@ -19,7 +19,11 @@ public class FleetUIManager : MonoBehaviour
     public DroneTelemetryController detailController; 
     public TextMeshProUGUI detailHeader;
 
+    // UI Cache
     private Dictionary<string, DroneCardUI> activeCards = new Dictionary<string, DroneCardUI>();
+    
+    // 🔥 DATA CACHE: Stores the last known state (from REST or WS) for every drone
+    private Dictionary<string, DroneTelemetryData> telemetryCache = new Dictionary<string, DroneTelemetryData>();
 
     void Awake()
     {
@@ -35,10 +39,7 @@ public class FleetUIManager : MonoBehaviour
         
         if (SelectionManager.Instance != null)
         {
-            // 1. Listen for Slot Switching (Context)
             SelectionManager.Instance.OnActiveSlotChanged += UpdateHeaderContext;
-            
-            // 2. NEW: Listen for Drone Selection (Data)
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSelectionChanged;
         }
     }
@@ -52,45 +53,55 @@ public class FleetUIManager : MonoBehaviour
         }
     }
 
-    // --- FIX 1: Handle Drone Selection ---
+    // --- SELECTION LOGIC ---
+
     void HandleSelectionChanged(int slotId, string droneId)
     {
-        // Only update header if this assignment is for the slot we are currently looking at
-        if (slotId == SelectionManager.Instance.ActiveSlotId)
+        // Only update if this event is for the slot we are currently watching
+        if (SelectionManager.Instance != null && slotId == SelectionManager.Instance.ActiveSlotId)
         {
             if (string.IsNullOrEmpty(droneId))
             {
-                UpdateHeaderContext(slotId); // Go back to "Select Drone..."
+                UpdateHeaderContext(slotId); 
             }
             else
             {
                 if (detailHeader) detailHeader.text = $"{droneId}";
+
+                // 🔥 FIX: Immediately populate Detail View from Cache
+                if (telemetryCache.ContainsKey(droneId) && detailController != null)
+                {
+                    detailController.UpdateVisuals(telemetryCache[droneId]);
+                }
             }
         }
     }
 
-    // --- FIX 2: Dynamic Text instead of Hardcoded ---
     void UpdateHeaderContext(int slotId)
     {
         if (detailHeader) 
         {
-            // 1. Get the ID currently assigned to this slot
             string droneId = SelectionManager.Instance != null ? 
                              SelectionManager.Instance.GetDroneAtSlot(slotId) : null;
 
-            // 2. Set the text
             if (string.IsNullOrEmpty(droneId))
             {
                 detailHeader.text = "NO DRONE SELECTED";
             }
             else
             {
-                // Displays just the ID (e.g., "RD001")
                 detailHeader.text = droneId; 
-
+                
+                // 🔥 FIX: Also refresh visuals if we just switched active slots
+                if (telemetryCache.ContainsKey(droneId) && detailController != null)
+                {
+                    detailController.UpdateVisuals(telemetryCache[droneId]);
+                }
             }
         }
     }
+
+    // --- DATA FETCHING ---
 
     IEnumerator FetchDroneList()
     {
@@ -114,6 +125,7 @@ public class FleetUIManager : MonoBehaviour
     {
         if (string.IsNullOrEmpty(snapshot.droneId)) return;
 
+        // 1. Create/Update the UI Card
         if (!activeCards.ContainsKey(snapshot.droneId))
         {
             GameObject newCard = Instantiate(droneCardPrefab, gridContainer);
@@ -122,36 +134,86 @@ public class FleetUIManager : MonoBehaviour
             activeCards.Add(snapshot.droneId, cardUI);
         }
         activeCards[snapshot.droneId].UpdateFromSnapshot(snapshot);
+
+        // 🔥 FIX: Cache this snapshot as Telemetry Data
+        // Even if the drone is Offline, we now have its last known location/battery.
+        DroneTelemetryData adaptedData = ConvertSnapshotToTelemetry(snapshot);
+        if (telemetryCache.ContainsKey(snapshot.droneId))
+            telemetryCache[snapshot.droneId] = adaptedData;
+        else
+            telemetryCache.Add(snapshot.droneId, adaptedData);
     }
 
     public void HandleLiveUpdate(DroneTelemetryData telemetry)
     {
         if (string.IsNullOrEmpty(telemetry.droneId)) return;
 
-        // 1. Update the Card List (Always happens)
+        // 1. Update Cache (Always keep the latest)
+        if (telemetryCache.ContainsKey(telemetry.droneId))
+            telemetryCache[telemetry.droneId] = telemetry;
+        else
+            telemetryCache.Add(telemetry.droneId, telemetry);
+
+        // 2. Update Fleet Card
         if (activeCards.ContainsKey(telemetry.droneId))
         {
             activeCards[telemetry.droneId].UpdateFromLive(telemetry);
         }
 
-        // 2. Route to Dashboard (Corrected Logic)
-        // Check against the ACTIVE slot, not just slot 0
-        string activeDroneId = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
-
-        if (activeDroneId == telemetry.droneId && detailController != null)
+        // 3. Update Detail View (Only if we are looking at this drone)
+        if (SelectionManager.Instance != null)
         {
-             detailController.UpdateVisuals(telemetry);
+            string activeDroneId = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
+            if (activeDroneId == telemetry.droneId && detailController != null)
+            {
+                 detailController.UpdateVisuals(telemetry);
+            }
         }
+    }
+
+    // --- HELPERS ---
+
+    // Adapter to convert REST Snapshot -> Live Telemetry format
+    private DroneTelemetryData ConvertSnapshotToTelemetry(DroneSnapshotModel snap)
+    {
+        DroneTelemetryData data = new DroneTelemetryData();
+        
+        // 1. Top Level Info
+        data.droneId = snap.droneId;
+        data.model = snap.model; 
+
+        // 2. Nested Telemetry Info
+        if (snap.telemetry != null)
+        {
+            data.latitude = snap.telemetry.latitude;
+            data.longitude = snap.telemetry.longitude;
+            data.altitude = snap.telemetry.altitude;
+            
+            data.heading = snap.telemetry.heading;
+            data.velocityX = snap.telemetry.velocityX;
+            data.velocityZ = snap.telemetry.velocityZ; // Assuming Z is the other horizontal component
+            
+            data.batteryLevel = snap.telemetry.batteryLevel;
+            data.satCount = snap.telemetry.satelliteCount;
+            
+            data.isFlying = snap.telemetry.isFlying;
+            data.online = snap.telemetry.online;
+            data.motorsOn = snap.telemetry.areMotorsOn; // Maps 'areMotorsOn' -> 'motorsOn'
+        }
+        else
+        {
+            // Fallback if telemetry is null (e.g. freshly registered drone)
+            data.online = snap.isConnected;
+        }
+
+        return data;
     }
 
     public void ShowFleetView()
     {
         if(fleetViewPanel) fleetViewPanel.SetActive(true);
         if(detailViewPanel) detailViewPanel.SetActive(false);
-        
-        // Refresh header context
-        if (SelectionManager.Instance != null)
-            UpdateHeaderContext(SelectionManager.Instance.ActiveSlotId);
+        if (SelectionManager.Instance != null) UpdateHeaderContext(SelectionManager.Instance.ActiveSlotId);
     }
 
     public void ShowDroneDetail()
@@ -159,11 +221,20 @@ public class FleetUIManager : MonoBehaviour
         if(fleetViewPanel) fleetViewPanel.SetActive(false);
         if(detailViewPanel) detailViewPanel.SetActive(true);
         
-        // NEW: Ensure header is correct when entering detail view manually
-        string currentDrone = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
-        if (!string.IsNullOrEmpty(currentDrone))
+        // 🔥 FIX: Force update when opening the panel
+        if (SelectionManager.Instance != null)
         {
-             if (detailHeader) detailHeader.text = $"{currentDrone}";
+            string currentDrone = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
+            if (!string.IsNullOrEmpty(currentDrone))
+            {
+                if (detailHeader) detailHeader.text = $"{currentDrone}";
+                
+                // Load from Cache immediately
+                if (telemetryCache.ContainsKey(currentDrone) && detailController != null)
+                {
+                    detailController.UpdateVisuals(telemetryCache[currentDrone]);
+                }
+            }
         }
     }
 
