@@ -23,6 +23,7 @@ public class MapTileRenderer : MonoBehaviour
     // State
     private Dictionary<string, MapTile> activeTiles = new Dictionary<string, MapTile>();
     private Dictionary<string, Texture2D> textureCache = new Dictionary<string, Texture2D>();
+    private Dictionary<string, UnityWebRequest> activeRequests = new Dictionary<string, UnityWebRequest>();
     private int currentZoom = 15;
 
     // --- LIFECYCLE ---
@@ -175,7 +176,6 @@ public class MapTileRenderer : MonoBehaviour
 
     private IEnumerator LoadTexture(MapTile tile, string key)
     {
-        // Cache Hit
         if (textureCache.ContainsKey(key))
         {
             tile.rawImage.texture = textureCache[key];
@@ -183,23 +183,30 @@ public class MapTileRenderer : MonoBehaviour
             yield break;
         }
 
-        // Cache Miss - Download
         string url = tileProvider.GetTileUrl(tile.x, tile.y, tile.zoom);
         using (UnityWebRequest uwr = UnityWebRequestTexture.GetTexture(url))
         {
-            // User-Agent required by OSM
+            // 🔥 INSERT THIS: Register the request
+            if (activeRequests.ContainsKey(key)) activeRequests[key].Abort();
+            activeRequests[key] = uwr;
+
             uwr.SetRequestHeader("User-Agent", "UnityDroneGCS/1.0");
             yield return uwr.SendWebRequest();
+
+            // 🔥 INSERT THIS: Unregister when done
+            if (activeRequests.ContainsKey(key)) activeRequests.Remove(key);
 
             if (uwr.result == UnityWebRequest.Result.Success && tile.gameObject != null)
             {
                 Texture2D tex = DownloadHandlerTexture.GetContent(uwr);
                 
-                // Add to Cache
-                if (textureCache.Count > cacheSize) textureCache.Clear(); // Simple flush
+                // (Your existing Cache Logic...)
+                if (textureCache.Count > cacheSize) 
+                {
+                     var enumerator = textureCache.Keys.GetEnumerator();
+                     if (enumerator.MoveNext()) textureCache.Remove(enumerator.Current);
+                }
                 textureCache[key] = tex;
-
-                // Apply
                 tile.rawImage.texture = tex;
                 tile.IsTextureLoaded = true;
             }
@@ -216,6 +223,12 @@ public class MapTileRenderer : MonoBehaviour
 
         foreach (var key in toRemove)
         {
+            if (activeRequests.ContainsKey(key))
+            {
+                activeRequests[key].Abort();
+                activeRequests.Remove(key);
+            }
+
             Destroy(activeTiles[key].gameObject);
             activeTiles.Remove(key);
         }

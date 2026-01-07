@@ -8,6 +8,7 @@ public class FleetUIManager : MonoBehaviour
 {
     public static FleetUIManager Instance;
 
+    // ... (Your existing Headers and Variables remain the same) ...
     [Header("Backend")]
     public string apiBaseUrl = "http://localhost:5101"; 
 
@@ -23,25 +24,20 @@ public class FleetUIManager : MonoBehaviour
     private Dictionary<string, DroneCardUI> activeCards = new Dictionary<string, DroneCardUI>();
     private Dictionary<string, DroneTelemetryData> telemetryCache = new Dictionary<string, DroneTelemetryData>();
 
+    // ... (Awake, Start, OnDestroy remain the same) ...
     void Awake()
     {
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
-
-        // Default start
         ShowFleetView();
     }
 
     void Start()
     {
         StartCoroutine(FetchDroneList());
-        
         if (SelectionManager.Instance != null)
         {
-            // 1. Listen for Slot Switching (User presses Slot 1, Slot 2...)
             SelectionManager.Instance.OnActiveSlotChanged += HandleSlotSwitch;
-            
-            // 2. Listen for Drone Assignment (User clicks a card)
             SelectionManager.Instance.OnSlotSelectionChanged += HandleDroneAssignment;
         }
     }
@@ -55,47 +51,40 @@ public class FleetUIManager : MonoBehaviour
         }
     }
 
-    // --- 🔥 NEW NAVIGATION LOGIC ---
-
-    // Triggered when user clicks "Slot 1", "Slot 2" buttons
-    void HandleSlotSwitch(int slotId)
+    // --- 🔥 NEW: PUBLIC API TO ACCESS CACHE ---
+    // This is the missing link. It allows the Detail View to ask for data 
+    // immediately without waiting for a WebSocket update.
+    public DroneTelemetryData GetLastKnownData(string droneId)
     {
-        UpdateViewForSlot(slotId);
+        if (string.IsNullOrEmpty(droneId)) return null;
+
+        if (telemetryCache.ContainsKey(droneId))
+        {
+            return telemetryCache[droneId];
+        }
+        return null;
     }
 
-    // Triggered when a drone is assigned/unassigned
+    // ... (The rest of your existing logic: HandleSlotSwitch, UpdateViewForSlot, etc.) ...
+
+    void HandleSlotSwitch(int slotId) { UpdateViewForSlot(slotId); }
+
     void HandleDroneAssignment(int slotId, string droneId)
     {
-        // Only react if we modified the CURRENT slot
         if (SelectionManager.Instance != null && slotId == SelectionManager.Instance.ActiveSlotId)
-        {
             UpdateViewForSlot(slotId);
-        }
     }
 
-    // Central "Brain" that decides which panel to show
     void UpdateViewForSlot(int slotId)
     {
         string droneId = SelectionManager.Instance.GetDroneAtSlot(slotId);
         bool hasDrone = !string.IsNullOrEmpty(droneId);
 
-        // 1. Update Header Text
         if (detailHeader) detailHeader.text = hasDrone ? droneId : "NO DRONE SELECTED";
 
-        // 2. AUTO-NAVIGATION
-        if (hasDrone)
-        {
-            // If the slot has a drone, assume user wants to see Details
-            ShowDroneDetail();
-        }
-        else
-        {
-            // If the slot is empty, force Fleet View so user can pick one
-            ShowFleetView();
-        }
+        if (hasDrone) ShowDroneDetail();
+        else ShowFleetView();
     }
-
-    // --- STANDARD UI METHODS ---
 
     public void ShowFleetView()
     {
@@ -108,7 +97,7 @@ public class FleetUIManager : MonoBehaviour
         if(fleetViewPanel) fleetViewPanel.SetActive(false);
         if(detailViewPanel) detailViewPanel.SetActive(true);
         
-        // Refresh Data from Cache immediately
+        // Force update immediately when opening the panel
         if (SelectionManager.Instance != null)
         {
             string currentDrone = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
@@ -120,10 +109,11 @@ public class FleetUIManager : MonoBehaviour
         }
     }
 
-    // --- DATA HANDLING (No Changes) ---
-
+    // ... (Your existing Data Handling: FetchDroneList, HandleLiveUpdate, etc.) ...
+    
     IEnumerator FetchDroneList()
     {
+        // (Your existing code here...)
         string url = $"{apiBaseUrl}/api/drones?limit=50";
         using (UnityWebRequest req = UnityWebRequest.Get(url))
         {
@@ -136,43 +126,23 @@ public class FleetUIManager : MonoBehaviour
                     foreach (var drone in result.items) CreateOrUpdateCard(drone);
                 }
             }
-            else Debug.LogError($"❌ REST Error: {req.error}");
+            else Debug.LogWarning($"⚠️ REST Fetch Failed: {req.error}");
         }
-    }
-
-    public void CreateOrUpdateCard(DroneSnapshotModel snapshot)
-    {
-        if (string.IsNullOrEmpty(snapshot.droneId)) return;
-
-        if (!activeCards.ContainsKey(snapshot.droneId))
-        {
-            GameObject newCard = Instantiate(droneCardPrefab, gridContainer);
-            DroneCardUI cardUI = newCard.GetComponent<DroneCardUI>();
-            cardUI.Setup(snapshot.droneId);
-            activeCards.Add(snapshot.droneId, cardUI);
-        }
-        activeCards[snapshot.droneId].UpdateFromSnapshot(snapshot);
-
-        // Cache Data
-        DroneTelemetryData adaptedData = ConvertSnapshotToTelemetry(snapshot);
-        if (telemetryCache.ContainsKey(snapshot.droneId)) telemetryCache[snapshot.droneId] = adaptedData;
-        else telemetryCache.Add(snapshot.droneId, adaptedData);
     }
 
     public void HandleLiveUpdate(DroneTelemetryData telemetry)
     {
         if (string.IsNullOrEmpty(telemetry.droneId)) return;
 
-        // Cache Data
+        // 1. Cache Data (Crucial step!)
         if (telemetryCache.ContainsKey(telemetry.droneId)) telemetryCache[telemetry.droneId] = telemetry;
         else telemetryCache.Add(telemetry.droneId, telemetry);
 
-        if (activeCards.ContainsKey(telemetry.droneId))
-        {
-            activeCards[telemetry.droneId].UpdateFromLive(telemetry);
-        }
+        // 2. Create/Update Card
+        if (!activeCards.ContainsKey(telemetry.droneId)) CreateCardInternal(telemetry.droneId);
+        activeCards[telemetry.droneId].UpdateFromLive(telemetry);
 
-        // Live Update Detail View
+        // 3. Update Detail View
         if (SelectionManager.Instance != null)
         {
             string activeDroneId = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
@@ -183,12 +153,31 @@ public class FleetUIManager : MonoBehaviour
         }
     }
 
+    public void CreateOrUpdateCard(DroneSnapshotModel snapshot)
+    {
+        if (string.IsNullOrEmpty(snapshot.droneId)) return;
+        if (!activeCards.ContainsKey(snapshot.droneId)) CreateCardInternal(snapshot.droneId);
+        
+        activeCards[snapshot.droneId].UpdateFromSnapshot(snapshot);
+
+        DroneTelemetryData adaptedData = ConvertSnapshotToTelemetry(snapshot);
+        if (telemetryCache.ContainsKey(snapshot.droneId)) telemetryCache[snapshot.droneId] = adaptedData;
+        else telemetryCache.Add(snapshot.droneId, adaptedData);
+    }
+
+    private void CreateCardInternal(string droneId)
+    {
+        GameObject newCard = Instantiate(droneCardPrefab, gridContainer);
+        DroneCardUI cardUI = newCard.GetComponent<DroneCardUI>();
+        cardUI.Setup(droneId);
+        activeCards.Add(droneId, cardUI);
+    }
+
     private DroneTelemetryData ConvertSnapshotToTelemetry(DroneSnapshotModel snap)
     {
         DroneTelemetryData data = new DroneTelemetryData();
         data.droneId = snap.droneId;
         data.model = snap.model; 
-
         if (snap.telemetry != null)
         {
             data.latitude = snap.telemetry.latitude;
@@ -214,6 +203,5 @@ public class FleetUIManager : MonoBehaviour
     {
         int activeSlot = SelectionManager.Instance.ActiveSlotId;
         SelectionManager.Instance.ClearSlot(activeSlot);
-        // The event handler HandleDroneAssignment will catch this and automatically ShowFleetView()
     }
 }

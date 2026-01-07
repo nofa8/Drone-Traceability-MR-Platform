@@ -4,59 +4,47 @@ using System;
 
 public class DroneTelemetryController : MonoBehaviour
 {
-    [Header("Data Source (Optional)")]
-    [Tooltip("Leave empty if using Network Client. Assign MockDroneBackend for offline testing.")]
+    [Header("Data Source")]
     public GameObject dataSourceObject; 
     private IDroneDataSource dataSource;
 
-    [Header("UI References - Flight Data")]
+    [Header("UI References")]
     public TextMeshProUGUI speedText;
     public TextMeshProUGUI altitudeText;
     public TextMeshProUGUI batteryText;
-
-    [Header("UI References - Location")]
     public TextMeshProUGUI latitudeText;
     public TextMeshProUGUI longitudeText;
-
-    [Header("UI References - Status")]
     public TextMeshProUGUI modelText;
     public TextMeshProUGUI satelliteText;
     public TextMeshProUGUI statusText;
     
-    [Header("3D Digital Twin")]
+    [Header("Visuals")]
     public Transform droneModel;
     public float positionScale = 0.1f; 
     public DroneVisualizer visualizer;
 
-    [Header("System Architecture")]
-    [Tooltip("Which 'Monitor' is this? 0 = Main, 1 = Secondary")]
+    [Header("System")]
     public int assignedSlotId = 0;
-    
-    // The ID of the drone this dashboard is currently tracking
     private string currentTargetId;
-
 
     void Start()
     {
-        // 1. Setup Visualizer
         if (visualizer == null) visualizer = GetComponent<DroneVisualizer>();
 
-        // 2. Setup Selection System (The "Brain")
+        // Subscription
         if (SelectionManager.Instance != null)
         {
-            // Subscribe to the slot change event
             SelectionManager.Instance.OnSlotSelectionChanged += OnSlotChanged;
             
-            // Initialize with whatever is currently in this slot
+            // Initial check
             string existingId = SelectionManager.Instance.GetDroneAtSlot(assignedSlotId);
-            
             if (!string.IsNullOrEmpty(existingId))
             {
                 OnSlotChanged(assignedSlotId, existingId);
             }
         }
 
-        // 3. Setup Direct Data Source (Optional Mock)
+        // Optional Mock Source
         if (dataSourceObject != null)
         {
             dataSource = dataSourceObject.GetComponent<IDroneDataSource>();
@@ -66,87 +54,98 @@ public class DroneTelemetryController : MonoBehaviour
                 dataSource.Connect();
             }
         }
-        else
-        {
-            Debug.Log($"ℹ️ DroneController (Slot {assignedSlotId}): Passive Mode. Waiting for FleetManager.");
-        }
     }
 
-    // The Filter Logic
+    // 🔥 UPDATED LOGIC HERE
     void OnSlotChanged(int slotId, string newDroneId)
     {
-        // 🛑 CRITICAL: Only update if the event is for MY slot
         if (slotId != assignedSlotId) return;
 
         currentTargetId = newDroneId;
         
-        // Visual Reset if deselected
-        if (string.IsNullOrEmpty(newDroneId))
-        {
-            if (speedText) speedText.text = "Speed: -";
-            if (latitudeText) latitudeText.text = "Latitude: -";
-            if (longitudeText) longitudeText.text = "Longitude: -";
-            if (modelText) modelText.text = "Model: -";
-            if (satelliteText) satelliteText.text = "Satellite Count: -";
-            if (statusText) statusText.text = "Status: -";
+        // 1. CLEAR OLD DATA
+        // This ensures no stale numbers remain if the new drone has no data yet.
+        ClearVisuals();
 
-            if (visualizer != null)
+        // 2. FETCH LAST KNOWN DATA
+        // If the drone is valid, we check the cache immediately.
+        if (!string.IsNullOrEmpty(newDroneId) && FleetUIManager.Instance != null)
+        {
+            DroneTelemetryData cachedData = FleetUIManager.Instance.GetLastKnownData(newDroneId);
+            if (cachedData != null)
             {
-                visualizer.ResetToIdle();
+                UpdateVisuals(cachedData);
             }
-            
+            else
+            {
+                // If no data exists yet, set status to loading
+                if (statusText) statusText.text = "Status: <color=yellow>CONNECTING...</color>";
+            }
         }
     }
 
+    // New Helper to wipe the screen
+    private void ClearVisuals()
+    {
+        if (speedText) speedText.text = "Speed: --";
+        if (altitudeText) altitudeText.text = "Altitude: --";
+        if (batteryText) batteryText.text = "Battery: --";
+        if (latitudeText) latitudeText.text = "Latitude: --";
+        if (longitudeText) longitudeText.text = "Longitude: --";
+        if (modelText) modelText.text = "Model: --";
+        if (satelliteText) satelliteText.text = "Satellite Count: --";
+        if (statusText) statusText.text = "Status: --";
+
+        if (visualizer != null) visualizer.ResetToIdle();
+    }
 
     public void UpdateVisuals(DroneTelemetryData data)
     {
-        // 🔒 SECURITY CHECK: Only update if this data belongs to the selected drone
         if (data.droneId != currentTargetId) return; 
         
-        // --- UI Updates ---
+        // Math
         double speed = Math.Sqrt(data.velocityX * data.velocityX + data.velocityZ * data.velocityZ);
         
+        // UI Updates
         if (speedText) speedText.text = $"Speed: {speed:F1} m/s";
         if (altitudeText) altitudeText.text = $"Altitude: {data.altitude:F1} m";
         if (batteryText) batteryText.text = $"Battery: {data.batteryLevel:F0}%";
 
-        // --- Location Updates ---
         if (latitudeText) latitudeText.text = $"Latitude: {data.latitude:F5}";
         if (longitudeText) longitudeText.text = $"Longitude: {data.longitude:F5}";
 
-        // --- Status Updates ---
         if (modelText) modelText.text = "Model: "+data.model;
         
         if (satelliteText) 
         {
-            // Color code: Green if good GPS (>=10), Yellow if marginal, Red if bad
             string color = data.satCount >= 10 ? "green" : (data.satCount >= 6 ? "yellow" : "red");
             satelliteText.text = $"Satellite Count: <color={color}>{data.satCount}</color>";
         }
 
+        // Improved Status Logic
         if (statusText)
         {
-            if (data.isFlying) statusText.text = "<color=green>FLYING</color>";
-            else if (data.motorsOn) statusText.text = "<color=yellow>ARMED</color>";
-            else statusText.text = "<color=grey>IDLE</color>";
+            if (data.online)
+            {
+                if (data.isFlying) statusText.text = "Status: <color=green>FLYING</color>";
+                else if (data.motorsOn) statusText.text = "Status: <color=yellow>ARMED</color>";
+                else statusText.text = "Status: <color=white>ONLINE</color>";
+            }
+            else
+            {
+                statusText.text = "Status: <color=red>OFFLINE</color>";
+            }
         }
 
-        // --- 3D Model Movement ---
+        // 3D Model
         if (droneModel)
         {
             Vector3 targetPos = droneModel.localPosition;
             targetPos.y = (float)data.altitude * positionScale; 
-            
             droneModel.localPosition = targetPos;
-
-            // Rotation
             droneModel.localRotation = Quaternion.Euler(0, (float)data.heading, 0);
 
-            if (visualizer != null)
-            {
-                visualizer.UpdateVisuals(data);
-            }
+            if (visualizer != null) visualizer.UpdateVisuals(data);
         }
     }
 
@@ -154,7 +153,6 @@ public class DroneTelemetryController : MonoBehaviour
     {
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged -= OnSlotChanged;
-            
         if (dataSource != null) dataSource.Disconnect();
     }
 }

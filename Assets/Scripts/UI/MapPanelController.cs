@@ -15,6 +15,9 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
     public float minScale = 0.1f; 
     public float maxScale = 50.0f;
 
+    [Tooltip("Negative values bring the marker closer to the camera (on top of trails/map).")]
+    public float markerZIndex = -5.0f;
+
     [Range(0.1f, 2.0f)]
     public float panSensitivity = 1.0f;
 
@@ -173,7 +176,7 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         UpdateMarkerPosition(data, true);
     }
 
-    // 🔥 THE MANUAL BOUNDS CHECK (Code Mask)
+    // 🔥 THE MANUAL BOUNDS CHECK (Code Mask) + Z-INDEX FIX
     void UpdateMarkerPosition(DroneTelemetryData data, bool updateTrail)
     {
         if (!GeoMapContext.Instance) return;
@@ -199,21 +202,21 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         if (marker.gameObject.activeSelf != isInside) 
             marker.gameObject.SetActive(isInside);
 
-        // 5. Toggle Trail Visibility (UPDATED LOGIC)
-        // Now we hide the trail if the drone is off-screen.
+        // 5. Toggle Trail Visibility
         if (trail != null)
         {
             if (trail.gameObject.activeSelf != isInside)
                 trail.gameObject.SetActive(isInside);
         }
 
-        // 6. Apply Position (Even if hidden, so it's ready when it comes back)
-        marker.anchoredPosition = localPos;
+        // 6. Apply Position & Z-INDEX (The Fix)
+        // We set Z to -5.0f to ensure the sprite renders IN FRONT of the LineRenderer (which is at -2.5f)
+        marker.anchoredPosition3D = new Vector3(localPos.x, localPos.y, markerZIndex);
         marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
 
         if (isInside) UpdateVisuals(data.droneId);
         
-        // 7. Update Trail (Always add GPS point so we don't lose history while hidden)
+        // 7. Update Trail
         if (trail != null && updateTrail) 
         {
             trail.AddGpsPoint(data.latitude, data.longitude);

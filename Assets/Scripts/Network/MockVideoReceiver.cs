@@ -6,7 +6,6 @@ using System.Collections;
 [RequireComponent(typeof(VideoPlayer))]
 public class MockVideoReceiver : MonoBehaviour
 {
-    // Singleton so the UI can find US, instead of us finding the UI
     public static MockVideoReceiver Instance;
 
     [Header("Network Simulation")]
@@ -15,9 +14,9 @@ public class MockVideoReceiver : MonoBehaviour
     [Header("Video Source")]
     public VideoClip mockVideoFile; 
 
-    // --- THE SOURCE OF TRUTH ---
+    // Data
     public Texture CurrentFeed { get; private set; }
-    public event Action<Texture> OnStreamUpdated; // UI listens to this
+    public event Action<Texture> OnStreamUpdated;
 
     private VideoPlayer videoPlayer;
     private string currentDroneId;
@@ -34,19 +33,42 @@ public class MockVideoReceiver : MonoBehaviour
         videoPlayer.audioOutputMode = VideoAudioOutputMode.None;
     }
 
-    void Start()
+    IEnumerator Start()
     {
-        if (SelectionManager.Instance != null)
+        // 1. Wait until SelectionManager is ready
+        while (SelectionManager.Instance == null)
         {
-            SelectionManager.Instance.OnActiveSlotChanged += OnSlotChanged;
-            OnSlotChanged(SelectionManager.Instance.ActiveSlotId);
+            yield return null; 
         }
+
+        // 2. Subscribe to BOTH events
+        // Event A: User switches slots (e.g. Slot 1 -> Slot 2)
+        SelectionManager.Instance.OnActiveSlotChanged += OnSlotChanged;
+        
+        // Event B: User assigns a drone (e.g. Empty -> Drone A) [THIS WAS MISSING]
+        SelectionManager.Instance.OnSlotSelectionChanged += OnDroneAssigned;
+
+        // 3. Trigger initial check
+        OnSlotChanged(SelectionManager.Instance.ActiveSlotId);
     }
 
     void OnDestroy()
     {
         if (SelectionManager.Instance != null)
+        {
             SelectionManager.Instance.OnActiveSlotChanged -= OnSlotChanged;
+            SelectionManager.Instance.OnSlotSelectionChanged -= OnDroneAssigned;
+        }
+    }
+
+    // 🔥 NEW HANDLER: Filters assignment events
+    void OnDroneAssigned(int slotId, string droneId)
+    {
+        // Only refresh if the assignment happened on the slot we are currently watching
+        if (SelectionManager.Instance != null && slotId == SelectionManager.Instance.ActiveSlotId)
+        {
+            OnSlotChanged(slotId);
+        }
     }
 
     void OnSlotChanged(int slotId)
@@ -58,7 +80,7 @@ public class MockVideoReceiver : MonoBehaviour
         if (!string.IsNullOrEmpty(newDroneId))
         {
             currentDroneId = newDroneId;
-            StopAllCoroutines();
+            StopAllCoroutines(); // Stop any pending connections
             StartCoroutine(SimulateConnection());
         }
         else
@@ -69,6 +91,7 @@ public class MockVideoReceiver : MonoBehaviour
 
     IEnumerator SimulateConnection()
     {
+        // Simulate Network Delay
         yield return new WaitForSeconds(connectionLatency);
 
         if (mockVideoFile != null)
@@ -76,16 +99,15 @@ public class MockVideoReceiver : MonoBehaviour
             videoPlayer.clip = mockVideoFile;
             videoPlayer.Prepare();
 
+            // Wait for video to be ready
             while (!videoPlayer.isPrepared) yield return null;
 
             videoPlayer.Play();
             yield return null; 
 
-            // ✅ UPDATE STATE
             CurrentFeed = videoPlayer.texture;
             
-            // ✅ NOTIFY LISTENERS (Safely)
-            Debug.Log($"✅ MockReceiver: Stream Started for {currentDroneId}");
+            // Notify UI
             OnStreamUpdated?.Invoke(CurrentFeed);
         }
     }
