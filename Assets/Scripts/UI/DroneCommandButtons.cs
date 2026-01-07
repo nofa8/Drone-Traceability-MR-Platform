@@ -17,13 +17,14 @@ public class DroneCommandButtons : MonoBehaviour
     // State
     private string currentDroneId;
     private bool isArmed = false;
-    private bool isFlying = false; // New State Tracker
+    private bool isFlying = false;
 
     void Start()
     {
         if (SelectionManager.Instance != null)
         {
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSelection;
+            // Initialize
             HandleSelection(SelectionManager.Instance.ActiveSlotId, 
                             SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId));
         }
@@ -39,86 +40,77 @@ public class DroneCommandButtons : MonoBehaviour
 
     void HandleSelection(int slotId, string droneId)
     {
+        // Only update if this is the active slot
         if (SelectionManager.Instance != null && slotId != SelectionManager.Instance.ActiveSlotId) return;
+
         currentDroneId = droneId;
-        RefreshButtons(); // Re-evaluate locks when we switch drones
+
+        // 🔥 FIX: Reset state immediately when switching drones/slots
+        // This prevents the "Flying" status of Drone A from sticking to Empty Slot B.
+        if (string.IsNullOrEmpty(currentDroneId))
+        {
+            isArmed = false;
+            isFlying = false;
+        }
+
+        RefreshButtons(); 
     }
 
     void HandleTelemetry(DroneTelemetryData data)
     {
         if (data.droneId == currentDroneId)
         {
-            // Update States
-            bool newArmState = data.motorsOn; // or data.areMotorsOn based on your model
+            bool newArmState = data.motorsOn;
             bool newFlyState = data.isFlying;
 
             if (newArmState != isArmed || newFlyState != isFlying)
             {
                 isArmed = newArmState;
                 isFlying = newFlyState;
-                RefreshButtons(); // Refresh UI only on change
+                RefreshButtons();
             }
         }
     }
 
-    // --- SAFETY LOGIC ---
-
     void RefreshButtons()
     {
+        // "hasDrone" determines if buttons are physically clickable
         bool hasDrone = !string.IsNullOrEmpty(currentDroneId);
 
-        // 1. ARM BUTTON: Only available if ON GROUND
-        // Prevents accidental mid-air disarm (Crash).
+        // 1. ARM BUTTON
         if(btnArm) 
         {
             btnArm.interactable = hasDrone && !isFlying;
-            UpdateArmVisuals();
+            UpdateArmVisuals(hasDrone); // Pass 'hasDrone' to fix colors
         }
 
-        // 2. TAKEOFF: Only available if ON GROUND
+        // 2. TAKEOFF
         if(btnTakeoff) 
         {
-            // Optional: require isArmed == true before allowing takeoff?
-            // For now, we just say "If not flying, you can try to takeoff".
             btnTakeoff.interactable = hasDrone && !isFlying;
         }
 
-        // 3. LAND / RTL: Only available if IN AIR (or at least Armed)
+        // 3. LAND / RTL
         if(btnLand) btnLand.interactable = hasDrone && isFlying;
         if(btnGoHome) btnGoHome.interactable = hasDrone && isFlying;
 
-        // 4. STOP: ALWAYS Available (Emergency)
+        // 4. STOP (Emergency always available if drone exists)
         if(btnStop) btnStop.interactable = hasDrone;
     }
 
-    void ToggleArm()
-    {
-        if (string.IsNullOrEmpty(currentDroneId)) return;
-        
-        // Safety Check: Double confirm we are not flying
-        if (isFlying) 
-        {
-            Debug.LogWarning("⚠️ Safety Block: Cannot Disarm while flying!");
-            return;
-        }
-
-        bool targetState = !isArmed;
-        var client = FindFirstObjectByType<DroneNetworkClient>();
-        if (client) client.SendUtilityCommand(currentDroneId, "motors", targetState);
-    }
-
-    void SendFlightCmd(string cmd)
-    {
-        if (string.IsNullOrEmpty(currentDroneId)) return;
-        var client = FindFirstObjectByType<DroneNetworkClient>();
-        if (client) client.SendFlightCommand(currentDroneId, cmd);
-    }
-
-    void UpdateArmVisuals()
+    void UpdateArmVisuals(bool hasDrone)
     {
         if (armText)
         {
-            // If flying, maybe gray out the text or change it to "ARMED (LOCKED)"
+            // 🔥 FIX: Explicitly handle "No Drone" look
+            if (!hasDrone)
+            {
+                armText.text = "ARM";
+                armText.color = Color.gray; // Make text look disabled
+                return;
+            }
+
+            // Normal logic
             if (isFlying)
             {
                 armText.text = "ARMED";
@@ -130,6 +122,31 @@ public class DroneCommandButtons : MonoBehaviour
                 armText.color = isArmed ? Color.red : Color.green;
             }
         }
+    }
+
+    // --- ACTIONS ---
+
+    void ToggleArm()
+    {
+        if (string.IsNullOrEmpty(currentDroneId)) return;
+        
+        if (isFlying) 
+        {
+            Debug.LogWarning("⚠️ Safety Block: Cannot Disarm while flying!");
+            return;
+        }
+
+        bool targetState = !isArmed;
+        // Use FindFirstObjectByType (newer Unity versions)
+        var client = Object.FindFirstObjectByType<DroneNetworkClient>();
+        if (client) client.SendUtilityCommand(currentDroneId, "motors", targetState);
+    }
+
+    void SendFlightCmd(string cmd)
+    {
+        if (string.IsNullOrEmpty(currentDroneId)) return;
+        var client = Object.FindFirstObjectByType<DroneNetworkClient>();
+        if (client) client.SendFlightCommand(currentDroneId, cmd);
     }
 
     void OnDestroy()

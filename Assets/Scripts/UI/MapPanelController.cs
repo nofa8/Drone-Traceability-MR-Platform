@@ -15,6 +15,9 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
     public float minScale = 0.1f; 
     public float maxScale = 50.0f;
 
+    [Range(0.1f, 2.0f)]
+    public float panSensitivity = 1.0f;
+
     [Header("Slot Colors")]
     public Color[] slotColors = new Color[] { Color.cyan, new Color(1f, 0.5f, 0f) };
     public Color unassignedColor = Color.white;
@@ -127,16 +130,23 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         GeoMapContext.Instance.SetZoom(newScale); 
     }
 
+
     private void PanMap(Vector2 deltaPixels)
     {
         if (!GeoMapContext.Instance) return;
+
+        // Stop following drone if user interacts
+        GeoMapContext.Instance.SetFreeMode();
+
         float scale = GeoMapContext.Instance.pixelsPerMeter;
         if (scale <= 0.001f) return;
 
-        GeoMapContext.Instance.SetFreeMode(); // Stop following drone
+        // 🔥 THE FIX: Apply Sensitivity
+        // If panSensitivity is 0.5, the map moves half as fast as your finger.
+        Vector2 dampedDelta = deltaPixels * panSensitivity;
 
-        float deltaMetersX = -deltaPixels.x / scale;
-        float deltaMetersY = -deltaPixels.y / scale;
+        float deltaMetersX = -dampedDelta.x / scale;
+        float deltaMetersY = -dampedDelta.y / scale;
 
         Vector2 newCenter = GeoMapContext.Instance.ScreenToGeoPosition(new Vector2(deltaMetersX, deltaMetersY));
         GeoMapContext.Instance.SetCenter(newCenter.x, newCenter.y);
