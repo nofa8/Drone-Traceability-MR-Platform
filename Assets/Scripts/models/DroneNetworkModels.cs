@@ -70,11 +70,29 @@ public class WS_EventProbe
     public string eventType;
 }
 
-
+// 1. The Wrapper (The Envelope)
 [Serializable]
-public class WS_CommandEvent
+public class WS_CommandEnvelope
 {
     public string eventType = "Command";
     public string droneId;
-    public string command; // e.g. "ARM", "DISARM", "LAND", "RTL"
+    // We cannot serialize "object" or abstract classes with JsonUtility.
+    // So we will serialize the command separately and inject it, or use specific envelopes.
+}
+
+// 2. Flight Command Payload (Takeoff, Land, RTL)
+[Serializable]
+public class CMD_Flight
+{
+    public string _t = "FlightCommand"; // Discriminator
+    public string Command; // "takeoff", "land", "startGoHome"
+}
+
+// 3. Utility Command Payload (Arm/Disarm)
+[Serializable]
+public class CMD_Utility
+{
+    public string _t = "UtilityCommand"; // Discriminator
+    public string Command; // "motors"
+    public bool State;     // true = ARM, false = DISARM
 }

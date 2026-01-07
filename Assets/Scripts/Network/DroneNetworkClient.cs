@@ -179,26 +179,39 @@ public class DroneNetworkClient : MonoBehaviour
     }
 
 
+    // --- TYPED COMMAND SENDERS ---
 
-    public async void SendCommand(string droneId, string commandType)
+    public async void SendFlightCommand(string droneId, string action)
     {
-        // 1. Create the Payload
-        WS_CommandEvent cmd = new WS_CommandEvent
-        {
-            droneId = droneId,
-            command = commandType
-        };
+        // Simulator: sendCommand("FlightCommand", { command: "takeoff" });
+        // JSON: {"userId":"RD001", "role":"FlightCommand", "message":{"command":"takeoff"}}
 
-        string json = JsonUtility.ToJson(cmd);
+        string json = $"{{\"userId\":\"{droneId}\",\"role\":\"FlightCommand\",\"message\":{{\"command\":\"{action}\"}}}}";
+        
+        await SendRaw(json, droneId, $"FlightCmd: {action}");
+    }
 
-        // 2. Send via WebSocket (if connected)
+    public async void SendUtilityCommand(string droneId, string action, bool state)
+    {
+        // Simulator: sendCommand("UtilityCommand", { command: "motors", state: true });
+        // JSON: {"userId":"RD001", "role":"UtilityCommand", "message":{"command":"motors", "state":true}}
+
+        string stateStr = state ? "true" : "false"; // JSON boolean is lowercase
+        string json = $"{{\"userId\":\"{droneId}\",\"role\":\"UtilityCommand\",\"message\":{{\"command\":\"{action}\",\"state\":{stateStr}}}}}";
+
+        await SendRaw(json, droneId, $"UtilityCmd: {action}={(state ? "ON" : "OFF")}");
+    }
+
+    // Helper (No changes needed here, just for context)
+    private async Task SendRaw(string json, string droneId, string debugTag)
+    {
         if (ws != null && ws.State == WebSocketState.Open)
         {
             try
             {
                 ArraySegment<byte> bytesToSend = new ArraySegment<byte>(Encoding.UTF8.GetBytes(json));
                 await ws.SendAsync(bytesToSend, WebSocketMessageType.Text, true, cts.Token);
-                Debug.Log($"🚀 Sent Command: {commandType} to {droneId}");
+                Debug.Log($"🚀 Sent {debugTag} to {droneId}");
             }
             catch (Exception e)
             {
@@ -207,28 +220,8 @@ public class DroneNetworkClient : MonoBehaviour
         }
         else
         {
-            // Fallback for Debugging/Offline Mode
-            Debug.Log($"⚠️ [Offline Mode] Pretending to send: {json}");
+            Debug.Log($"⚠️ [Offline] Pretending to send: {json}");
         }
     }
 
-    public static void SendCommandGlobal(string commandType)
-    {
-        // Find the active drone
-        if (SelectionManager.Instance == null) return;
-        string droneId = SelectionManager.Instance.GetDroneAtSlot(SelectionManager.Instance.ActiveSlotId);
-
-        if (string.IsNullOrEmpty(droneId)) 
-        {
-            Debug.LogWarning("❌ Cannot send command: No Drone Selected!");
-            return;
-        }
-
-        // Find the client instance and send
-        DroneNetworkClient client = FindObjectOfType<DroneNetworkClient>();
-        if (client != null)
-        {
-            client.SendCommand(droneId, commandType);
-        }
-    }
 }
