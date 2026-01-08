@@ -43,12 +43,16 @@ public class DroneStateRepository : MonoBehaviour
 
         DroneState state = GetState(incomingData.droneId);
 
-        // Update the content
+        // Update current state (Existing)
         state.data = incomingData; 
         state.isConnected = true;
         state.lastHeartbeatTime = DateTime.UtcNow;
 
-        // Notify Listeners
+        // 🔥 NEW: Record to History
+        // Optional: Limit size to prevent memory issues (e.g. last 1000 points)
+        if (state.history.Count > 2000) state.history.RemoveAt(0); 
+        state.history.Add(incomingData);
+
         OnDroneStateUpdated?.Invoke(state.droneId, state);
     }
 
