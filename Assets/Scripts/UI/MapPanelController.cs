@@ -12,25 +12,28 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
 
     [Header("Dynamic Controls")]
     public float zoomSensitivity = 0.1f;
-    public float minScale = 0.1f; 
+    public float minScale = 0.0005f; 
     public float maxScale = 50.0f;
 
-    [Tooltip("Negative values bring the marker closer to the camera (on top of trails/map).")]
+    [Tooltip("Negative values bring the marker closer to the camera.")]
     public float markerZIndex = -5.0f;
 
-    [Range(0.1f, 2.0f)]
-    public float panSensitivity = 1.0f;
+    [Header("Panning Feel")]
+    [Tooltip("Base sensitivity when zoomed IN (1.0 = 1:1 movement)")]
+    [Range(0.1f, 2.0f)] public float panSensitivity = 1.0f;
+    
+    [Tooltip("How much 'heavier' the map feels when zoomed OUT (0.1 = very heavy)")]
+    [Range(0.01f, 1.0f)] public float zoomedOutDamping = 0.2f;
 
-    [Header("Slot Colors")]
+    [Header("Visual Feedback")]
     public Color[] slotColors = new Color[] { Color.cyan, new Color(1f, 0.5f, 0f) };
     public Color unassignedColor = Color.white;
+    [Range(0.1f, 1f)] public float offlineAlpha = 0.4f;
 
     // --- VISUAL STATE ---
     private Dictionary<string, RectTransform> markers = new Dictionary<string, RectTransform>();
     private Dictionary<string, MapTrackRenderer> trails = new Dictionary<string, MapTrackRenderer>();
-
-    // --- DATA CACHE ---
-    private Dictionary<string, DroneTelemetryData> cachedTelemetry = new Dictionary<string, DroneTelemetryData>();
+    private Dictionary<string, DroneState> cachedStates = new Dictionary<string, DroneState>();
 
     // --- MULTI-TOUCH STATE ---
     private Dictionary<int, Vector2> activeTouches = new Dictionary<int, Vector2>();
@@ -41,7 +44,14 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged += HandleSelectionChanged;
         
-        DroneNetworkClient.OnGlobalTelemetry += HandleTelemetry;
+        if (DroneStateRepository.Instance != null)
+        {
+            DroneStateRepository.Instance.OnDroneStateUpdated += HandleStateUpdate;
+            foreach(var state in DroneStateRepository.Instance.GetAllStates())
+            {
+                HandleStateUpdate(state.droneId, state);
+            }
+        }
 
         if (GeoMapContext.Instance != null)
             GeoMapContext.Instance.OnMapUpdated += ReDrawAllMarkers;
@@ -52,14 +62,15 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged -= HandleSelectionChanged;
         
-        DroneNetworkClient.OnGlobalTelemetry -= HandleTelemetry;
+        if (DroneStateRepository.Instance != null)
+            DroneStateRepository.Instance.OnDroneStateUpdated -= HandleStateUpdate;
 
         if (GeoMapContext.Instance != null)
             GeoMapContext.Instance.OnMapUpdated -= ReDrawAllMarkers;
     }
 
-    // --- INPUT HANDLERS (Zoom/Pan) ---
-
+    // --- INPUT HANDLERS ---
+    
     public void OnPointerDown(PointerEventData eventData)
     {
         if (!activeTouches.ContainsKey(eventData.pointerId))
@@ -121,37 +132,36 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
     private void ApplyZoom(float delta)
     {
         if (!GeoMapContext.Instance) return;
-
         float currentScale = GeoMapContext.Instance.pixelsPerMeter;
-        float newScale = currentScale;
-        float strength = Mathf.Abs(delta);
-
-        if (delta > 0) newScale *= (1f + strength);
-        else newScale /= (1f + strength);
-
+        float newScale = delta > 0 ? currentScale * (1f + Mathf.Abs(delta)) : currentScale / (1f + Mathf.Abs(delta));
         newScale = Mathf.Clamp(newScale, minScale, maxScale);
         GeoMapContext.Instance.SetZoom(newScale); 
     }
 
-
+    // 🔥 THE FIX: Dynamic Panning Damping
     private void PanMap(Vector2 deltaPixels)
     {
         if (!GeoMapContext.Instance) return;
-
-        // Stop following drone if user interacts
+        
         GeoMapContext.Instance.SetFreeMode();
 
         float scale = GeoMapContext.Instance.pixelsPerMeter;
-        if (scale <= 0.001f) return;
+        if (scale <= 0.00001f) return;
 
-        // 🔥 THE FIX: Apply Sensitivity
-        // If panSensitivity is 0.5, the map moves half as fast as your finger.
-        Vector2 dampedDelta = deltaPixels * panSensitivity;
+        // 1. Calculate Zoom Percentage (Logarithmic is best for Maps)
+        // t = 0 (Zoomed Out / World View)
+        // t = 1 (Zoomed In / Street View)
+        float t = Mathf.InverseLerp(Mathf.Log(minScale), Mathf.Log(maxScale), Mathf.Log(scale));
 
-        float deltaMetersX = -dampedDelta.x / scale;
-        float deltaMetersY = -dampedDelta.y / scale;
+        // 2. Adjust Sensitivity dynamically
+        // When zoomed out, we blend towards 'zoomedOutDamping' (e.g. 0.2)
+        // When zoomed in, we use full 'panSensitivity' (e.g. 1.0)
+        float dynamicSens = Mathf.Lerp(zoomedOutDamping, 1.0f, t) * panSensitivity;
 
-        Vector2 newCenter = GeoMapContext.Instance.ScreenToGeoPosition(new Vector2(deltaMetersX, deltaMetersY));
+        // 3. Apply Damped Delta
+        Vector2 dampedDelta = deltaPixels * dynamicSens;
+
+        Vector2 newCenter = GeoMapContext.Instance.ScreenToGeoPosition(new Vector2(-dampedDelta.x / scale, -dampedDelta.y / scale));
         GeoMapContext.Instance.SetCenter(newCenter.x, newCenter.y);
     }
 
@@ -159,67 +169,49 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
 
     void ReDrawAllMarkers()
     {
-        // 1. Redraw Markers (without adding new points to trail)
-        foreach (var kvp in cachedTelemetry)
-        {
-            UpdateMarkerPosition(kvp.Value, false); 
-        }
-        // 2. Refresh Trails (Recalculate GPS -> Pixels)
+        foreach (var kvp in cachedStates) UpdateMarkerPosition(kvp.Value, false); 
         foreach(var trail in trails.Values) trail.Refresh();
     }
 
-    void HandleTelemetry(DroneTelemetryData data)
+    void HandleStateUpdate(string droneId, DroneState state)
     {
-        if (!cachedTelemetry.ContainsKey(data.droneId)) cachedTelemetry.Add(data.droneId, data);
-        else cachedTelemetry[data.droneId] = data;
+        if (!cachedStates.ContainsKey(droneId)) cachedStates.Add(droneId, state);
+        else cachedStates[droneId] = state;
 
-        UpdateMarkerPosition(data, true);
+        UpdateMarkerPosition(state, true);
     }
 
-    // 🔥 THE MANUAL BOUNDS CHECK (Code Mask) + Z-INDEX FIX
-    void UpdateMarkerPosition(DroneTelemetryData data, bool updateTrail)
+    void UpdateMarkerPosition(DroneState state, bool updateTrail)
     {
-        if (!GeoMapContext.Instance) return;
+        if (!GeoMapContext.Instance || state == null) return;
+        DroneTelemetryData data = state.data;
 
-        // 1. Calculate Screen Position
         Vector2 localPos = GeoMapContext.Instance.GeoToScreenPosition(data.latitude, data.longitude);
 
-        // 2. Ensure Marker Exists
         if (!markers.ContainsKey(data.droneId)) CreateMarkerAndTrail(data.droneId);
         
         RectTransform marker = markers[data.droneId];
         MapTrackRenderer trail = trails.ContainsKey(data.droneId) ? trails[data.droneId] : null;
 
-        // 3. BOUNDS CHECK: Is the point inside the visible map area?
         float halfW = mapRect.rect.width / 2f;
         float halfH = mapRect.rect.height / 2f;
-        float buffer = 10f; // Small buffer to prevent popping at edge
+        float buffer = 10f; 
 
         bool isInside = (localPos.x >= -(halfW + buffer) && localPos.x <= (halfW + buffer) && 
                          localPos.y >= -(halfH + buffer) && localPos.y <= (halfH + buffer));
 
-        // 4. Toggle Marker Visibility
-        if (marker.gameObject.activeSelf != isInside) 
-            marker.gameObject.SetActive(isInside);
+        if (marker.gameObject.activeSelf != isInside) marker.gameObject.SetActive(isInside);
+        if (trail != null && trail.gameObject.activeSelf != isInside) trail.gameObject.SetActive(isInside);
 
-        // 5. Toggle Trail Visibility
-        if (trail != null)
-        {
-            if (trail.gameObject.activeSelf != isInside)
-                trail.gameObject.SetActive(isInside);
-        }
-
-        // 6. Apply Position & Z-INDEX (The Fix)
-        // We set Z to -5.0f to ensure the sprite renders IN FRONT of the LineRenderer (which is at -2.5f)
         marker.anchoredPosition3D = new Vector3(localPos.x, localPos.y, markerZIndex);
         marker.localRotation = Quaternion.Euler(0, 0, -(float)data.heading);
 
-        if (isInside) UpdateVisuals(data.droneId);
+        if (isInside) UpdateMarkerVisuals(state);
         
-        // 7. Update Trail
         if (trail != null && updateTrail) 
         {
-            trail.AddGpsPoint(data.latitude, data.longitude);
+            if (state.isConnected && !state.IsStale && data.isFlying)
+                trail.AddGpsPoint(data.latitude, data.longitude);
         }
     }
 
@@ -240,11 +232,16 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
         }
     }
 
-    void HandleSelectionChanged(int slotId, string droneId) { foreach(var id in markers.Keys) UpdateVisuals(id); }
+    void HandleSelectionChanged(int slotId, string droneId) 
+    { 
+        foreach(var kvp in cachedStates) UpdateMarkerVisuals(kvp.Value); 
+    }
 
-    void UpdateVisuals(string droneId)
+    void UpdateMarkerVisuals(DroneState state)
     {
+        string droneId = state.droneId;
         if (!markers.ContainsKey(droneId)) return;
+
         RectTransform marker = markers[droneId];
         Image img = marker.GetComponent<Image>();
         
@@ -253,14 +250,21 @@ public class MapPanelController : MonoBehaviour, IDragHandler, IScrollHandler, I
 
         Color targetColor = unassignedColor;
         float scale = 1.0f;
+
         if (ownerSlot != -1) {
             if (ownerSlot < slotColors.Length) targetColor = slotColors[ownerSlot];
             else targetColor = Color.magenta;
             scale = 1.5f;
+            marker.SetAsLastSibling(); 
         }
+
+        // Apply Ghost Effect
+        if (state.IsStale || !state.isConnected) targetColor.a = offlineAlpha; 
+        else targetColor.a = 1.0f; 
+
         if (img) img.color = targetColor;
         marker.localScale = Vector3.one * scale;
-        if (ownerSlot != -1) marker.SetAsLastSibling();
+
         if (trails.ContainsKey(droneId)) trails[droneId].SetColor(targetColor);
     }
 }
