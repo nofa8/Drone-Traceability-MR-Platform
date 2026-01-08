@@ -15266,7 +15266,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -341.49976, y: 175.00009}
+  m_AnchoredPosition: {x: -341.49976, y: 174.99931}
   m_SizeDelta: {x: 683, y: 0}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &722961512
@@ -19890,6 +19890,7 @@ MonoBehaviour:
   btnBackToLive: {fileID: 327502145}
   ghostMarkerPrefab: {fileID: 6346931612728282616, guid: 8ac5ac68f9567384b9787689ddef1050, type: 3}
   mapContainer: {fileID: 1498750412}
+  detailController: {fileID: 1458050152}
   targetDroneId: 
 --- !u!4 &938669778
 Transform:
@@ -30040,7 +30041,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f77323bf3221a2d48b4a4aba25517600, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FleetUIManager
-  apiBaseUrl: http://192.168.1.177:5101
+  apiBaseUrl: http://10.20.229.91:5101
   fleetViewPanel: {fileID: 536680942}
   detailViewPanel: {fileID: 1338864740}
   gridContainer: {fileID: 722961511}
@@ -39458,8 +39459,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1486471834}
   m_HandleRect: {fileID: 1486471833}
   m_Direction: 2
-  m_Value: 0
-  m_Size: 1
+  m_Value: 1
+  m_Size: 0.99974394
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -40136,7 +40137,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 33b3af2e400a7704daed134d802d6230, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneNetworkClient
-  serverUrl: ws://192.168.1.177:5102
+  serverUrl: ws://10.20.229.91:5102
   droneID: 0
   autoReconnect: 1
 --- !u!328 &1957692440
