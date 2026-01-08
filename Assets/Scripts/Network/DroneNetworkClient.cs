@@ -137,9 +137,11 @@ public class DroneNetworkClient : MonoBehaviour
         cleanData.batteryTemp = t.batteryTemperature;
         cleanData.satCount = t.satelliteCount;
 
-        // 1. Send to Fleet Manager (UI List)
-        if (FleetUIManager.Instance != null)
-            FleetUIManager.Instance.HandleLiveUpdate(cleanData);
+        // 1. Update Repository
+        if (DroneStateRepository.Instance != null)
+            DroneStateRepository.Instance.UpdateFromTelemetry(cleanData);
+        else
+            Debug.LogError("❌ DroneStateRepository not initialized!");
 
         // 2. Broadcast to Map (Global)
         OnGlobalTelemetry?.Invoke(cleanData);
@@ -154,8 +156,8 @@ public class DroneNetworkClient : MonoBehaviour
             offlineData.droneId = packet.payload;
             offlineData.online = false; 
             
-            if (FleetUIManager.Instance != null)
-                FleetUIManager.Instance.HandleLiveUpdate(offlineData);
+            if (DroneStateRepository.Instance != null)
+                DroneStateRepository.Instance.MarkDisconnected(packet.payload);
             
             // Also notify map so it can maybe turn the dot gray?
              OnGlobalTelemetry?.Invoke(offlineData);
@@ -170,10 +172,16 @@ public class DroneNetworkClient : MonoBehaviour
 
     public static void SendMockTelemetry(DroneTelemetryData data)
     {
+        // ✅ STEP 0: Feed Repository (Critical for Mock Data to appear in Detail View)
+        if (DroneStateRepository.Instance != null)
+        {
+            DroneStateRepository.Instance.UpdateFromTelemetry(data);
+        }
+
         // 1. Send to Map
         OnGlobalTelemetry?.Invoke(data);
 
-        // 2. Send to Dashboard (in case it's not subscribed to Global yet)
+        // 2. Send to Dashboard (Legacy/Backup)
         if (FleetUIManager.Instance != null)
             FleetUIManager.Instance.HandleLiveUpdate(data);
     }

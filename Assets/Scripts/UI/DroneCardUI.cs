@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using System;
 
 public class DroneCardUI : MonoBehaviour
 {
@@ -8,7 +9,7 @@ public class DroneCardUI : MonoBehaviour
     public TextMeshProUGUI idText;
     public TextMeshProUGUI modelText;
     public TextMeshProUGUI statusText;
-    public TextMeshProUGUI batteryText; // NEW: Shows "85%"
+    public TextMeshProUGUI batteryText; 
     public Image batteryFill;
     public Image statusIcon; 
     public Image selectionBorder; 
@@ -17,19 +18,32 @@ public class DroneCardUI : MonoBehaviour
     public Color slot0Color = Color.cyan;
     public Color slot1Color = new Color(1f, 0.5f, 0f); // Orange
     public Color offlineColor = Color.gray;
-    public Color defaultBorderColor = new Color(0, 0, 0, 0); // Transparent
+    public Color staleColor = Color.yellow; // Shows when data is old/snapshot
+    public Color defaultBorderColor = new Color(0, 0, 0, 0); 
 
     public string droneId { get; private set; }
 
     // --- LIFECYCLE ---
     void Start()
     {
+        // 1. Listen for Selection Changes (Border Highlight)
         if (SelectionManager.Instance != null)
         {
-            // Listen for ANY change in selection
             SelectionManager.Instance.OnSlotSelectionChanged += HandleAnySelectionChange;
-            // Check initial state
             RefreshSelectionVisuals();
+        }
+
+        // 2. Listen to the Repository (Automatic Data Updates)
+        if (DroneStateRepository.Instance != null)
+        {
+            DroneStateRepository.Instance.OnDroneStateUpdated += HandleStateUpdate;
+            
+            // Initial Fetch: Pull data immediately so the card isn't empty on spawn
+            if (!string.IsNullOrEmpty(droneId))
+            {
+                var state = DroneStateRepository.Instance.GetState(droneId);
+                UpdateVisuals(state);
+            }
         }
     }
 
@@ -37,6 +51,9 @@ public class DroneCardUI : MonoBehaviour
     {
         if (SelectionManager.Instance != null)
             SelectionManager.Instance.OnSlotSelectionChanged -= HandleAnySelectionChange;
+
+        if (DroneStateRepository.Instance != null)
+            DroneStateRepository.Instance.OnDroneStateUpdated -= HandleStateUpdate;
     }
 
     // --- SETUP & INTERACTION ---
@@ -55,67 +72,52 @@ public class DroneCardUI : MonoBehaviour
 
     void OnClick()
     {
-        SelectionManager.Instance.AssignDroneToActiveSlot(this.droneId);
-        FleetUIManager.Instance.ShowDroneDetail(); 
+        if (SelectionManager.Instance != null)
+        {
+            SelectionManager.Instance.AssignDroneToActiveSlot(this.droneId);
+            if (FleetUIManager.Instance) FleetUIManager.Instance.ShowDroneDetail(); 
+        }
     }
 
-    // --- VISUAL FEEDBACK (Border Highlight) ---
+    // --- REPOSITORY EVENT HANDLER ---
+    private void HandleStateUpdate(string updatedId, DroneState state)
+    {
+        // Only update if this event is about ME
+        if (updatedId == this.droneId)
+        {
+            UpdateVisuals(state);
+        }
+    }
+
+    // --- COMPATIBILITY ADAPTERS ---
+    // These ensure FleetUIManager doesn't break, but we defer logic to the Repository
     
-    // We ignore the specific arguments and just refresh our own state
-    private void HandleAnySelectionChange(int slotId, string selectedId)
+    public void UpdateFromSnapshot(DroneSnapshotModel snap)
     {
-        RefreshSelectionVisuals();
-    }
-
-    private void RefreshSelectionVisuals()
-    {
-        if (!selectionBorder || SelectionManager.Instance == null) return;
-
-        // Ask the Manager: "Am I assigned to any slot?"
-        int mySlot = SelectionManager.Instance.GetSlotForDrone(this.droneId);
-
-        if (mySlot == 0) selectionBorder.color = slot0Color;      // Cyan for Slot 0
-        else if (mySlot == 1) selectionBorder.color = slot1Color; // Orange for Slot 1
-        else selectionBorder.color = defaultBorderColor;          // Hidden
-    }
-
-    // --- DATA UPDATES ---
-
-    public void UpdateFromSnapshot(DroneSnapshotModel data)
-    {
-        if (modelText) modelText.text = data.model;
-
-        // Pass 'areMotorsOn' if available
-        if (data.telemetry != null) 
-        {
-            UpdateVisuals(
-                data.telemetry.batteryLevel, 
-                data.telemetry.online, 
-                data.telemetry.isFlying,
-                data.telemetry.areMotorsOn // Use snapshot motors data
-            );
-        }
-        else 
-        {
-            UpdateVisuals(0, data.isConnected, false, false);
-        }
+        // We only set static text here. We let the Repository event trigger the full visual update.
+        if (modelText) modelText.text = snap.model;
     }
 
     public void UpdateFromLive(DroneTelemetryData data)
     {
-        UpdateVisuals(
-            data.batteryLevel, 
-            data.online, 
-            data.isFlying,
-            data.motorsOn // Use live motors data
-        );
+        // No-op: The Repository event will handle this automatically.
     }
 
-    // 🔥 IMPROVED: Now handles "ARMED" state and Battery Text
-    private void UpdateVisuals(double battery, bool isOnline, bool isFlying, bool areMotorsOn)
+    // --- CORE VISUALIZATION LOGIC ---
+
+    private void UpdateVisuals(DroneState state)
     {
-        // 1. Battery Visuals
-        float batVal = (float)battery;
+        if (state == null) return;
+        DroneTelemetryData data = state.data;
+
+        // 1. Model Text
+        if (modelText && !string.IsNullOrEmpty(data.model)) modelText.text = data.model;
+
+        // 2. Battery Visuals
+        float batVal = (float)data.batteryLevel;
+        
+        if (batteryText) batteryText.text = $"{Mathf.RoundToInt(batVal)}%";
+
         if (batteryFill)
         {
             batteryFill.fillAmount = batVal / 100f;
@@ -123,25 +125,26 @@ public class DroneCardUI : MonoBehaviour
             else if (batVal < 50) batteryFill.color = Color.yellow;
             else batteryFill.color = Color.green;
         }
-        
-        // NEW: Battery Text
-        if (batteryText) batteryText.text = $"{Mathf.RoundToInt(batVal)}%";
 
-        // 2. Status Logic (Hierarchy of States)
+        // 3. Status Logic (Hierarchy of States)
         if (statusText && statusIcon)
         {
-            if (!isOnline) 
+            // 🔥 THE FIX: Prioritize "Stale" check over "Flying"
+            if (state.IsStale)
+            {
+                SetStatus("STALE", staleColor);
+            }
+            else if (!state.isConnected) 
             { 
                 SetStatus("OFFLINE", offlineColor);
             }
-            else if (isFlying) 
+            else if (data.isFlying) 
             { 
                 SetStatus("FLYING", Color.cyan);
             }
-            else if (areMotorsOn)
+            else if (data.motorsOn)
             {
-                // New "Armed" state (Motors on, but on ground)
-                SetStatus("ARMED", new Color(1f, 0.5f, 0f)); // Orange/Red warning
+                SetStatus("ARMED", new Color(1f, 0.5f, 0f)); // Orange
             }
             else 
             { 
@@ -154,5 +157,22 @@ public class DroneCardUI : MonoBehaviour
     {
         statusText.text = text;
         statusIcon.color = color;
+    }
+
+    // --- SELECTION HIGHLIGHT LOGIC ---
+    private void HandleAnySelectionChange(int slotId, string selectedId)
+    {
+        RefreshSelectionVisuals();
+    }
+
+    private void RefreshSelectionVisuals()
+    {
+        if (!selectionBorder || SelectionManager.Instance == null) return;
+
+        int mySlot = SelectionManager.Instance.GetSlotForDrone(this.droneId);
+
+        if (mySlot == 0) selectionBorder.color = slot0Color;      
+        else if (mySlot == 1) selectionBorder.color = slot1Color; 
+        else selectionBorder.color = defaultBorderColor;          
     }
 }
