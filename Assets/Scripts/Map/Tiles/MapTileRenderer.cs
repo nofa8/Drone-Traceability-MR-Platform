@@ -47,11 +47,23 @@ public class MapTileRenderer : MonoBehaviour
         if (mapContext != null)
             mapContext.OnMapUpdated -= RefreshTiles;
     }
+    
+    void OnEnable()
+    {
+        // If we have a context, force a redraw immediately
+        if (mapContext != null)
+        {
+            RefreshTiles();
+        }
+    }
 
     // --- CORE LOOP ---
 
     public void RefreshTiles()
     {
+
+        if (!this.isActiveAndEnabled || !tileContainer) return;
+
         if (!mapContext || !tileContainer) return;
 
         // 1. Calculate Zoom Level based on Context Scale

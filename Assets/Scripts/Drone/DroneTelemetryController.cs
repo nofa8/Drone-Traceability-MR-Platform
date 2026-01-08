@@ -30,6 +30,9 @@ public class DroneTelemetryController : MonoBehaviour
     public int assignedSlotId = 0;
 
     private string currentTargetId;
+    
+    // 🔥 NEW: Replay Override State (The "Hijack" Variable)
+    private DroneTelemetryData replayOverrideData = null;
 
     void Start()
     {
@@ -38,27 +41,24 @@ public class DroneTelemetryController : MonoBehaviour
         // 1. Setup Selection System
         if (SelectionManager.Instance != null)
         {
-            // A. Handle assigning a drone to a slot
             SelectionManager.Instance.OnSlotSelectionChanged += OnSlotAssignmentChanged;
 
-            // B. Handle switching which slot we are looking at (Slot 1 -> Slot 2)
             if (trackActiveSlot)
             {
                 SelectionManager.Instance.OnActiveSlotChanged += OnActiveSlotChanged;
                 assignedSlotId = SelectionManager.Instance.ActiveSlotId;
             }
             
-            // Initial Refresh
             RefreshTarget();
         }
 
-        // 2. Setup Repository Listener (The Gold Standard)
+        // 2. Setup Repository Listener
         if (DroneStateRepository.Instance != null)
         {
             DroneStateRepository.Instance.OnDroneStateUpdated += HandleStateUpdate;
         }
 
-        // 3. Setup Direct Data Source (Optional Mock)
+        // 3. Setup Direct Data Source
         if (dataSourceObject != null)
         {
             dataSource = dataSourceObject.GetComponent<IDroneDataSource>();
@@ -84,38 +84,49 @@ public class DroneTelemetryController : MonoBehaviour
         if (dataSource != null) dataSource.Disconnect();
     }
 
+    // --- 🎮 REPLAY API (The Safe Override) ---
+
+    public void SetReplayOverride(DroneTelemetryData historyData)
+    {
+        replayOverrideData = historyData;
+        // Force immediate render of history data
+        UpdateSharedVisuals(historyData, isReplay: true);
+    }
+
+    public void ClearReplayOverride()
+    {
+        replayOverrideData = null;
+        // Immediately revert to live state
+        RefreshTarget();
+    }
+
     // --- EVENT HANDLERS ---
 
-    // Event A: User switches tabs (Slot 1 -> Slot 2)
     void OnActiveSlotChanged(int newSlotId)
     {
         assignedSlotId = newSlotId;
         RefreshTarget();
     }
 
-    // Event B: User assigns a drone to a slot
     void OnSlotAssignmentChanged(int slotId, string newDroneId)
     {
         if (slotId != assignedSlotId) return;
         RefreshTarget();
     }
 
-    // Helper: Find the correct drone ID and update UI
     void RefreshTarget()
     {
         if (SelectionManager.Instance == null) return;
 
         currentTargetId = SelectionManager.Instance.GetDroneAtSlot(assignedSlotId);
         
-        // 1. Clear immediately to avoid confusion
         if (string.IsNullOrEmpty(currentTargetId))
         {
             ClearVisuals();
             return;
         }
 
-        // 2. Fetch last known state immediately from Repository
-        // 🔥 This fixes the "Empty Detail View" bug!
+        // Fetch last known state immediately
         if (DroneStateRepository.Instance != null)
         {
             DroneState savedState = DroneStateRepository.Instance.GetState(currentTargetId);
@@ -123,7 +134,6 @@ public class DroneTelemetryController : MonoBehaviour
         }
     }
 
-    // Event C: Repository has new data
     void HandleStateUpdate(string droneId, DroneState state)
     {
         if (droneId == currentTargetId)
@@ -132,22 +142,18 @@ public class DroneTelemetryController : MonoBehaviour
         }
     }
 
-    // Event D: Direct Data Source (Mock/Test)
     void HandleDirectTelemetry(DroneTelemetryData data)
     {
-        // Option A: If we have a Repository, feed it (Best Practice)
         if (DroneStateRepository.Instance != null)
         {
             DroneStateRepository.Instance.UpdateFromTelemetry(data);
         }
         else 
         {
-            // Option B: Fallback (Direct Mode)
             DroneState tempState = new DroneState(data.droneId);
             tempState.data = data;
             tempState.isConnected = true;
             tempState.lastHeartbeatTime = DateTime.UtcNow;
-            
             UpdateVisuals(tempState);
         }
     }
@@ -168,14 +174,48 @@ public class DroneTelemetryController : MonoBehaviour
         if (visualizer != null) visualizer.ResetToIdle();
     }
 
+    // The "Live" Entry Point
     public void UpdateVisuals(DroneState state)
     {
+        // 🔒 SAFETY: If Replay is active, ignore live updates!
+        if (replayOverrideData != null) {
+            return;
+        }
+
         if (state == null) return;
         DroneTelemetryData data = state.data;
 
-        // Security Check
         if (data.droneId != currentTargetId) return; 
-        
+
+        // 1. Handle Status Logic (State-Dependent)
+        // This includes your "Stale" and "Offline" checks
+        if (statusText)
+        {
+            if (state.IsStale) statusText.text = "Status: <color=yellow>STALE</color>";
+            else if (!state.isConnected) statusText.text = "Status: <color=red>OFFLINE</color>";
+            else if (data.isFlying) statusText.text = "Status: <color=green>FLYING</color>";
+            else if (data.motorsOn) statusText.text = "Status: <color=orange>ARMED</color>";
+            else statusText.text = "Status: <color=white>ONLINE</color>";
+        }
+
+        // 2. Handle "Ghost Flying" Prevention
+        // If data is Stale, Force Idle 3D model
+        if (state.IsStale || !state.isConnected)
+        {
+            if (visualizer != null) visualizer.ResetToIdle();
+            // We still update text, but maybe not position if you prefer
+            UpdateSharedVisuals(data, isReplay: false, skipModel: true);
+        }
+        else
+        {
+            // Normal Live Render
+            UpdateSharedVisuals(data, isReplay: false, skipModel: false);
+        }
+    }
+
+    // 🔥 NEW: Shared Renderer (Used by both Live and Replay)
+    private void UpdateSharedVisuals(DroneTelemetryData data, bool isReplay, bool skipModel = false)
+    {
         // Math
         double speed = Math.Sqrt(data.velocityX * data.velocityX + data.velocityZ * data.velocityZ);
         
@@ -193,34 +233,31 @@ public class DroneTelemetryController : MonoBehaviour
             satelliteText.text = $"Sats: <color={color}>{data.satCount}</color>";
         }
 
-        // Status Logic (Uses State Meta-Data)
-        if (statusText)
+        // Replay specific status override
+        if (isReplay && statusText)
         {
-            if (state.IsStale) statusText.text = "Status: <color=yellow>STALE</color>";
-            else if (!state.isConnected) statusText.text = "Status: <color=red>OFFLINE</color>";
-            else if (data.isFlying) statusText.text = "Status: <color=green>FLYING</color>";
-            else if (data.motorsOn) statusText.text = "Status: <color=orange>ARMED</color>";
-            else statusText.text = "Status: <color=white>ONLINE</color>";
+            statusText.text = "Status: REPLAY";
         }
 
         // 3D Model Logic
-        // 🔥 FIX: If data is Stale (old snapshot), Force Idle to avoid "Ghost Flying"
-        if (state.IsStale || !state.isConnected)
+        if (!skipModel && droneModel)
         {
-            if (visualizer != null) visualizer.ResetToIdle();
-            // We can still show the position if you want, but rotation/props should stop
+            Vector3 targetPos = droneModel.localPosition;
+            targetPos.y = (float)data.altitude * positionScale; 
+            droneModel.localPosition = targetPos;
+            droneModel.localRotation = Quaternion.Euler(0, (float)data.heading, 0);
         }
-        else
+
+        // Only update visualizer (props spinning) if not skipping model
+        if (!skipModel && visualizer != null) 
         {
-            // Only move the model if we have FRESH data
-            if (droneModel)
-            {
-                Vector3 targetPos = droneModel.localPosition;
-                targetPos.y = (float)data.altitude * positionScale; 
-                droneModel.localPosition = targetPos;
-                droneModel.localRotation = Quaternion.Euler(0, (float)data.heading, 0);
-            }
-            if (visualizer != null) visualizer.UpdateVisuals(data);
+            visualizer.UpdateVisuals(data);
+        }
+        else if (visualizer != null && isReplay)
+        {
+             // Optional: If you want props to spin during replay, allow it. 
+             // If not, call ResetToIdle(). Usually Replay = Static or Flying state from history.
+             visualizer.UpdateVisuals(data);
         }
     }
 }
