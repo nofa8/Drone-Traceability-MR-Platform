@@ -2,19 +2,22 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
+/// <summary>
+/// POV Panel Controller - WebRTC Only.
+/// Displays drone video feeds with status indicators.
+/// </summary>
 [RequireComponent(typeof(AspectRatioFitter))]
 public class POVPanelController : MonoBehaviour
 {
-    // Static instance is still useful, but not critical anymore
-    public static POVPanelController Instance; 
+    public static POVPanelController Instance;
 
     [Header("UI Components")]
-    public RawImage videoDisplay;      
-    public TextMeshProUGUI statusText; 
-    public Image recordingIcon;        
+    public RawImage videoDisplay;
+    public TextMeshProUGUI statusText;
+    public Image recordingIcon;
 
     [Header("Defaults")]
-    public Texture offlinePlaceholder; 
+    public Texture offlinePlaceholder;
     public Color noSignalColor = Color.gray;
 
     private AspectRatioFitter ratioFitter;
@@ -26,24 +29,19 @@ public class POVPanelController : MonoBehaviour
         if (ratioFitter) ratioFitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
     }
 
-    // 🔥 THIS IS THE FIX
     void OnEnable()
     {
-        // 1. Check if the receiver is already running a stream
-        if (MockVideoReceiver.Instance != null)
+        // Subscribe to VideoStreamController
+        if (VideoStreamController.Instance != null)
         {
-            // Subscribe for future updates
-            MockVideoReceiver.Instance.OnStreamUpdated += HandleStreamUpdate;
+            VideoStreamController.Instance.OnVideoReceived += HandleVideoReceived;
+            VideoStreamController.Instance.OnStatusChanged += HandleStatusChanged;
 
-            // Grab the CURRENT stream immediately (in case it started while we were closed)
-            if (MockVideoReceiver.Instance.CurrentFeed != null)
-            {
-                HandleStreamUpdate(MockVideoReceiver.Instance.CurrentFeed);
-            }
+            // Grab current state
+            if (VideoStreamController.Instance.CurrentTexture != null)
+                HandleVideoReceived(VideoStreamController.Instance.CurrentTexture);
             else
-            {
-                Disconnect();
-            }
+                HandleStatusChanged(VideoStreamController.Instance.CurrentStatus);
         }
         else
         {
@@ -53,18 +51,39 @@ public class POVPanelController : MonoBehaviour
 
     void OnDisable()
     {
-        // Clean up subscription so we don't get errors when closed
-        if (MockVideoReceiver.Instance != null)
+        if (VideoStreamController.Instance != null)
         {
-            MockVideoReceiver.Instance.OnStreamUpdated -= HandleStreamUpdate;
+            VideoStreamController.Instance.OnVideoReceived -= HandleVideoReceived;
+            VideoStreamController.Instance.OnStatusChanged -= HandleStatusChanged;
         }
     }
 
-    // Event Handler
-    void HandleStreamUpdate(Texture newFeed)
+    // --- EVENT HANDLERS ---
+
+    void HandleVideoReceived(Texture texture)
     {
-        if (newFeed != null) SetVideoTexture(newFeed);
-        else Disconnect();
+        if (texture != null)
+            SetVideoTexture(texture);
+    }
+
+    void HandleStatusChanged(VideoStreamController.StreamStatus status)
+    {
+        switch (status)
+        {
+            case VideoStreamController.StreamStatus.Live:
+                SetStatus("LIVE", true, Color.green);
+                break;
+            case VideoStreamController.StreamStatus.Connecting:
+                SetStatus("CONNECTING...", false, Color.white);
+                break;
+            case VideoStreamController.StreamStatus.Failed:
+                SetStatus("FAILED", false, Color.red);
+                break;
+            case VideoStreamController.StreamStatus.Offline:
+            default:
+                Disconnect();
+                break;
+        }
     }
 
     // --- VISUAL LOGIC ---
@@ -74,15 +93,13 @@ public class POVPanelController : MonoBehaviour
         if (videoDisplay != null && newFeed != null)
         {
             videoDisplay.texture = newFeed;
-            videoDisplay.color = Color.white; 
-            
+            videoDisplay.color = Color.white;
+
             if (ratioFitter != null)
             {
                 float ratio = (float)newFeed.width / newFeed.height;
                 ratioFitter.aspectRatio = ratio;
             }
-
-            SetStatus("LIVE FEED", true);
         }
     }
 
@@ -101,15 +118,15 @@ public class POVPanelController : MonoBehaviour
                 videoDisplay.color = noSignalColor;
             }
         }
-        SetStatus("NO SIGNAL", false);
+        SetStatus("NO SIGNAL", false, Color.red);
     }
 
-    private void SetStatus(string text, bool active)
+    private void SetStatus(string text, bool active, Color color)
     {
-        if (statusText) 
+        if (statusText)
         {
             statusText.text = text;
-            statusText.color = active ? Color.green : Color.red;
+            statusText.color = color;
         }
         if (recordingIcon) recordingIcon.gameObject.SetActive(active);
     }

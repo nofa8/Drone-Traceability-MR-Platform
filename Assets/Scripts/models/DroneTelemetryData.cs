@@ -19,7 +19,7 @@ public class DroneTelemetryData
     public double heading;
     
     // Status
-    public double batteryLevel; // Normalized to match Internal usage
+    public double batteryLevel;
     public double batteryTemp;
     public int satCount;
     
@@ -28,4 +28,8 @@ public class DroneTelemetryData
     public bool online;
     public bool motorsOn;
     public bool lightsOn;
+    
+    // NEW: Autopilot State (from OtherAPP)
+    public bool isGoingHome;
+    public bool isMissionActive;
 }

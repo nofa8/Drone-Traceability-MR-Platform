@@ -31,15 +31,71 @@ public class FleetUIManager : MonoBehaviour
         if (Instance == null) Instance = this;
         else Destroy(gameObject);
         ShowFleetView();
+        
+        Debug.LogWarning("⚡ FleetUIManager.Awake() called");
     }
 
     void Start()
     {
-        StartCoroutine(FetchDroneList());
+        Debug.LogWarning("⚡ FleetUIManager.Start() called");
+        StartCoroutine(DeferredSubscription());
+    }
+    
+    // Waits for singletons to be ready before subscribing
+    IEnumerator DeferredSubscription()
+    {
+        Debug.LogWarning("⏳ FleetUIManager: Waiting for singletons...");
+        
+        // Wait up to 2 seconds for DroneStateRepository
+        float timeout = 2f;
+        float elapsed = 0f;
+        
+        while (DroneStateRepository.Instance == null && elapsed < timeout)
+        {
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+        
+        if (DroneStateRepository.Instance == null)
+        {
+            Debug.LogError("❌ FleetUIManager: DroneStateRepository.Instance STILL NULL after 2s! Check scene setup.");
+            yield break;
+        }
+        
+        // Subscribe to Selection events
         if (SelectionManager.Instance != null)
         {
             SelectionManager.Instance.OnActiveSlotChanged += HandleSlotSwitch;
             SelectionManager.Instance.OnSlotSelectionChanged += HandleDroneAssignment;
+            Debug.LogWarning("✅ FleetUIManager: Subscribed to SelectionManager events");
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ FleetUIManager: SelectionManager.Instance is NULL!");
+        }
+        
+        // Subscribe to Repository events
+        DroneStateRepository.Instance.OnNewDroneDiscovered += HandleNewDroneDiscovered;
+        DroneStateRepository.Instance.OnDroneStateUpdated += HandleDroneStateUpdated;
+        Debug.LogWarning("✅ FleetUIManager: Subscribed to DroneStateRepository events");
+        
+        // *** FIX: Sync any drones that were discovered BEFORE we subscribed ***
+        SyncExistingDrones();
+    }
+    
+    // Creates cards for drones that were discovered before we subscribed
+    void SyncExistingDrones()
+    {
+        var existingDrones = DroneStateRepository.Instance.GetAllStates();
+        Debug.LogWarning($"🔄 FleetUIManager: Syncing {existingDrones.Count} existing drones");
+        
+        foreach (var drone in existingDrones)
+        {
+            if (!activeCards.ContainsKey(drone.droneId))
+            {
+                Debug.LogWarning($"🔄 Creating card for pre-existing drone: {drone.droneId}");
+                CreateCardInternal(drone.droneId);
+            }
         }
     }
     
@@ -49,6 +105,12 @@ public class FleetUIManager : MonoBehaviour
         {
             SelectionManager.Instance.OnActiveSlotChanged -= HandleSlotSwitch;
             SelectionManager.Instance.OnSlotSelectionChanged -= HandleDroneAssignment;
+        }
+        
+        if (DroneStateRepository.Instance != null)
+        {
+            DroneStateRepository.Instance.OnNewDroneDiscovered -= HandleNewDroneDiscovered;
+            DroneStateRepository.Instance.OnDroneStateUpdated -= HandleDroneStateUpdated;
         }
     }
 
@@ -83,48 +145,57 @@ public class FleetUIManager : MonoBehaviour
     {
         if(fleetViewPanel) fleetViewPanel.SetActive(false);
         if(detailViewPanel) detailViewPanel.SetActive(true);
-        
-        // ❌ REMOVED: Manual update logic. 
-        // The DroneTelemetryController now fetches its own data from DroneStateRepository 
-        // as soon as the panel opens or the slot changes.
     }
 
-    // --- DATA HANDLING ---
+    // --- REPOSITORY-DRIVEN DATA HANDLING ---
 
+    // NEW: Called when Repository discovers a drone for the first time
+    void HandleNewDroneDiscovered(string droneId)
+    {
+        Debug.Log($"🎯 FleetUIManager.HandleNewDroneDiscovered called for: {droneId}");
+        
+        if (string.IsNullOrEmpty(droneId)) return;
+        
+        // Idempotent card creation
+        if (!activeCards.ContainsKey(droneId))
+        {
+            Debug.Log($"📝 Creating card for: {droneId}");
+            CreateCardInternal(droneId);
+        }
+        else
+        {
+            Debug.Log($"⏭️ Card already exists for: {droneId}");
+        }
+    }
+    
+    // NEW: Called on every state update from Repository
+    void HandleDroneStateUpdated(string droneId, DroneState state)
+    {
+        if (string.IsNullOrEmpty(droneId) || state == null) return;
+        
+        // Update card if it exists
+        if (activeCards.ContainsKey(droneId))
+        {
+            activeCards[droneId].UpdateFromLive(state.data);
+        }
+        
+        // Cache for quick access
+        if (telemetryCache.ContainsKey(droneId)) 
+            telemetryCache[droneId] = state.data;
+        else 
+            telemetryCache.Add(droneId, state.data);
+    }
+
+    // Legacy: Still works if called directly (e.g., by MockDroneBackend)
     public void HandleLiveUpdate(DroneTelemetryData telemetry)
     {
         if (string.IsNullOrEmpty(telemetry.droneId)) return;
 
-        // 1. Cache Data (For Fleet Cards)
         if (telemetryCache.ContainsKey(telemetry.droneId)) telemetryCache[telemetry.droneId] = telemetry;
         else telemetryCache.Add(telemetry.droneId, telemetry);
 
-        // 2. Create/Update Card
         if (!activeCards.ContainsKey(telemetry.droneId)) CreateCardInternal(telemetry.droneId);
         activeCards[telemetry.droneId].UpdateFromLive(telemetry);
-
-        // ❌ REMOVED: Redundant call to detailController.UpdateVisuals()
-        // The Detail View listens to DroneStateRepository events automatically.
-    }
-
-    // --- REST FETCHING ---
-
-    IEnumerator FetchDroneList()
-    {
-        string url = $"{apiBaseUrl}/api/drones?limit=50";
-        using (UnityWebRequest req = UnityWebRequest.Get(url))
-        {
-            yield return req.SendWebRequest();
-            if (req.result == UnityWebRequest.Result.Success)
-            {
-                var result = JsonUtility.FromJson<PagedSnapshotResult>(req.downloadHandler.text);
-                if (result?.items != null)
-                {
-                    foreach (var drone in result.items) CreateOrUpdateCard(drone);
-                }
-            }
-            else Debug.LogWarning($"⚠️ REST Fetch Failed: {req.error}");
-        }
     }
 
     
@@ -147,10 +218,32 @@ public class FleetUIManager : MonoBehaviour
 
     private void CreateCardInternal(string droneId)
     {
+        Debug.Log($"🏗️ CreateCardInternal: Creating card for {droneId}");
+        
+        if (droneCardPrefab == null)
+        {
+            Debug.LogError("❌ droneCardPrefab is NULL! Cannot create card.");
+            return;
+        }
+        
+        if (gridContainer == null)
+        {
+            Debug.LogError("❌ gridContainer is NULL! Cannot create card.");
+            return;
+        }
+        
         GameObject newCard = Instantiate(droneCardPrefab, gridContainer);
         DroneCardUI cardUI = newCard.GetComponent<DroneCardUI>();
+        
+        if (cardUI == null)
+        {
+            Debug.LogError("❌ DroneCardUI component not found on prefab!");
+            return;
+        }
+        
         cardUI.Setup(droneId);
         activeCards.Add(droneId, cardUI);
+        Debug.Log($"✅ Card created for {droneId}. Total cards: {activeCards.Count}");
     }
 
     private DroneTelemetryData ConvertSnapshotToTelemetry(DroneSnapshotModel snap)

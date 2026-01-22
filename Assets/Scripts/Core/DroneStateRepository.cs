@@ -11,6 +11,9 @@ public class DroneStateRepository : MonoBehaviour
 
     // Events for UI to listen to
     public event Action<string, DroneState> OnDroneStateUpdated;
+    
+    // NEW: Event for first-time drone discovery (Repository-driven card creation)
+    public event Action<string> OnNewDroneDiscovered;
 
     void Awake()
     {
@@ -39,20 +42,41 @@ public class DroneStateRepository : MonoBehaviour
     // --- WRITE API (Live Telemetry - High Priority) ---
     public void UpdateFromTelemetry(DroneTelemetryData incomingData)
     {
-        if (string.IsNullOrEmpty(incomingData.droneId)) return;
+        if (string.IsNullOrEmpty(incomingData.droneId)) 
+        {
+            Debug.LogWarning("⚠️ Repository: Received data with empty droneId!");
+            return;
+        }
+
+        // Check if this is a NEW drone (first time seen)
+        bool isNewDrone = !_states.ContainsKey(incomingData.droneId);
+        
+        if (isNewDrone)
+        {
+            Debug.Log($"🆕 <color=yellow>Repository: NEW drone discovered: {incomingData.droneId}</color>");
+        }
 
         DroneState state = GetState(incomingData.droneId);
 
-        // Update current state (Existing)
+        // Update current state
         state.data = incomingData; 
         state.isConnected = true;
         state.lastHeartbeatTime = DateTime.UtcNow;
 
-        // 🔥 NEW: Record to History
-        // Optional: Limit size to prevent memory issues (e.g. last 1000 points)
+        // Record to History (limit to prevent memory issues)
         if (state.history.Count > 2000) state.history.RemoveAt(0); 
         state.history.Add(incomingData);
 
+        // Fire discovery event FIRST (for card creation)
+        if (isNewDrone)
+        {
+            int listenerCount = OnNewDroneDiscovered?.GetInvocationList()?.Length ?? 0;
+            Debug.Log($"📢 Repository: Firing OnNewDroneDiscovered ({listenerCount} listeners)");
+            OnNewDroneDiscovered?.Invoke(incomingData.droneId);
+        }
+
+        // Then fire update event (for data refresh)
+        int updateListenerCount = OnDroneStateUpdated?.GetInvocationList()?.Length ?? 0;
         OnDroneStateUpdated?.Invoke(state.droneId, state);
     }
 

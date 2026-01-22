@@ -41,13 +41,12 @@ public class DroneNetworkClient : MonoBehaviour
                 ws = new ClientWebSocket();
                 cts = new CancellationTokenSource();
 
-                string myClientID = "Dash-" + UnityEngine.Random.Range(1000, 9999);
-                Uri uri = new Uri($"{serverUrl}");
+                Uri uri = new Uri($"{serverUrl}?dboidsID={droneID}");
 
-                Debug.Log($"⏳ Connecting to {uri}...");
+                // Debug.Log($"⏳ Connecting to {uri}...");
                 await ws.ConnectAsync(uri, cts.Token);
                 
-                Debug.Log("✅ <color=green>Connected to Backend!</color>");
+                // Debug.Log("✅ <color=green>Connected to Backend!</color>");
                 isReconnecting = false;
                 retryDelay = 1000; 
 
@@ -70,44 +69,106 @@ public class DroneNetworkClient : MonoBehaviour
     async Task ReceiveLoop()
     {
         var buffer = new byte[8192];
+        int messageCount = 0;
+        
+        // Debug.Log("📡 <color=cyan>ReceiveLoop started - waiting for messages...</color>");
+        
         try
         {
             while (ws.State == WebSocketState.Open && !cts.IsCancellationRequested)
             {
                 var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), cts.Token);
+                
                 if (result.MessageType == WebSocketMessageType.Text)
                 {
+                    messageCount++;
                     string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    
+                    // DEBUG: Log every 10th message to avoid spam
+                    if (messageCount <= 3 || messageCount % 50 == 0)
+                    {
+                        Debug.Log($"📥 [Msg #{messageCount}] Received {result.Count} bytes");
+                        // Show first 200 chars of JSON for debugging
+                        string preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
+                        Debug.Log($"📦 JSON Preview: {preview}");
+                    }
+                    
                     MainThreadDispatcher.Enqueue(() => ProcessMessageSafe(json));
+                }
+                else if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    Debug.LogWarning($"🔌 Server sent Close: {result.CloseStatus} - {result.CloseStatusDescription}");
                 }
             }
         }
-        catch (Exception) { /* Expected disconnect */ }
+        catch (Exception e) 
+        { 
+            Debug.LogWarning($"⚠️ ReceiveLoop ended: {e.Message}");
+        }
+        
+        // Debug.Log($"📡 ReceiveLoop exited. Total messages: {messageCount}");
     }
 
     void ProcessMessageSafe(string json)
     {
         try
         {
-            var probe = JsonUtility.FromJson<WS_EventProbe>(json);
-            if (probe == null || string.IsNullOrEmpty(probe.eventType)) return;
+            // --- OPTION 1: Try OtherAPP's wrapped format: { userId, role, message: {...} } ---
+            var wrapper = JsonUtility.FromJson<VehicleMessageWrapper>(json);
+            
+            if (wrapper != null && wrapper.message != null && !string.IsNullOrEmpty(wrapper.userId))
+            {
+                // Debug.Log($"✅ <color=green>Parsed Wrapper: {wrapper.userId} role={wrapper.role} @ ({wrapper.message.lat:F4}, {wrapper.message.lng:F4}) alt={wrapper.message.alt:F1}m</color>");
+                
+                // Use Adapter Layer for clean mapping
+                DroneTelemetryData cleanData = VehicleDTOAdapter.FromWrapper(wrapper);
+                
+                if (cleanData != null)
+                {
+                    // 1. Update Repository (Single Source of Truth)
+                    if (DroneStateRepository.Instance != null)
+                    {
+                        DroneStateRepository.Instance.UpdateFromTelemetry(cleanData);
+                    }
+                    else
+                    {
+                        Debug.LogError("❌ DroneStateRepository.Instance is NULL!");
+                    }
 
-            if (probe.eventType == "DroneTelemetryReceived")
-            {
-                ParseTelemetry(json);
+                    // 2. Broadcast to Map (Global)
+                    OnGlobalTelemetry?.Invoke(cleanData);
+                }
+                return;
             }
-            else if (probe.eventType == "DroneDisconnected")
+            
+            // --- OPTION 2: Fallback to legacy wrapped format (eventType) ---
+            var probe = JsonUtility.FromJson<WS_EventProbe>(json);
+            if (probe != null && !string.IsNullOrEmpty(probe.eventType))
             {
-                ParseDisconnect(json);
+                Debug.Log($"📜 Legacy format detected: {probe.eventType}");
+                
+                if (probe.eventType == "DroneTelemetryReceived")
+                {
+                    ParseLegacyTelemetry(json);
+                }
+                else if (probe.eventType == "DroneDisconnected")
+                {
+                    ParseDisconnect(json);
+                }
+                return;
             }
+            
+            // --- Unknown format ---
+            Debug.LogWarning($"⚠️ Unknown message format. First 100 chars: {json.Substring(0, Math.Min(100, json.Length))}");
         }
         catch (Exception e)
         {
-            Debug.LogError($"💥 JSON Error: {e.Message}");
+            Debug.LogError($"💥 JSON Parse Error: {e.Message}\nJSON: {json.Substring(0, Math.Min(200, json.Length))}");
         }
     }
 
-    void ParseTelemetry(string json)
+    // Legacy format support (can be removed once fully migrated)
+    void ParseLegacyTelemetry(string json)
     {
         var packet = JsonUtility.FromJson<WS_TelemetryEvent>(json);
         if (packet?.payload?.telemetry == null) return;
@@ -137,13 +198,9 @@ public class DroneNetworkClient : MonoBehaviour
         cleanData.batteryTemp = t.batteryTemperature;
         cleanData.satCount = t.satelliteCount;
 
-        // 1. Update Repository
         if (DroneStateRepository.Instance != null)
             DroneStateRepository.Instance.UpdateFromTelemetry(cleanData);
-        else
-            Debug.LogError("❌ DroneStateRepository not initialized!");
 
-        // 2. Broadcast to Map (Global)
         OnGlobalTelemetry?.Invoke(cleanData);
     }
 
@@ -152,15 +209,14 @@ public class DroneNetworkClient : MonoBehaviour
         var packet = JsonUtility.FromJson<WS_DisconnectEvent>(json);
         if (packet != null && !string.IsNullOrEmpty(packet.payload))
         {
-            DroneTelemetryData offlineData = new DroneTelemetryData();
-            offlineData.droneId = packet.payload;
-            offlineData.online = false; 
-            
             if (DroneStateRepository.Instance != null)
                 DroneStateRepository.Instance.MarkDisconnected(packet.payload);
             
-            // Also notify map so it can maybe turn the dot gray?
-             OnGlobalTelemetry?.Invoke(offlineData);
+            // Notify map to update visual state
+            DroneTelemetryData offlineData = new DroneTelemetryData();
+            offlineData.droneId = packet.payload;
+            offlineData.online = false; 
+            OnGlobalTelemetry?.Invoke(offlineData);
         }
     }
 
@@ -219,7 +275,7 @@ public class DroneNetworkClient : MonoBehaviour
             {
                 ArraySegment<byte> bytesToSend = new ArraySegment<byte>(Encoding.UTF8.GetBytes(json));
                 await ws.SendAsync(bytesToSend, WebSocketMessageType.Text, true, cts.Token);
-                Debug.Log($"🚀 Sent {debugTag} to {droneId}");
+                // Debug.Log($"🚀 Sent {debugTag} to {droneId}");
             }
             catch (Exception e)
             {

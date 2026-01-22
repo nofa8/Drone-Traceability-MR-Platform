@@ -15266,7 +15266,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -341.49976, y: 174.99931}
+  m_AnchoredPosition: {x: -341.49976, y: 175.00003}
   m_SizeDelta: {x: 683, y: 0}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &722961512
@@ -16014,6 +16014,8 @@ GameObject:
   - component: {fileID: 769018671}
   - component: {fileID: 769018670}
   - component: {fileID: 769018673}
+  - component: {fileID: 769018676}
+  - component: {fileID: 769018675}
   m_Layer: 0
   m_Name: '[MANAGER]'
   m_TagString: Untagged
@@ -16028,7 +16030,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 769018669}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0aa2a02bc673411458c358b3c11f709a, type: 3}
   m_Name: 
@@ -16098,6 +16100,42 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c40ebbc3ab6e2914e860c091a2cc0d7d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneStateRepository
+--- !u!114 &769018675
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 769018669}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e78fcaa721f2d6c4091b93238cc7c886, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::WebRTCVideoReceiver
+  serverIP: 192.168.1.231
+  webrtcPort: 8889
+  whepPathFormat: '{0}/whep'
+  connectionTimeout: 10
+  frameTimeout: 15
+  iceServers:
+  - stun:stun.l.google.com:19302
+  targetDisplay: {fileID: 513979733}
+  verboseLogging: 1
+--- !u!114 &769018676
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 769018669}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e679b972adb82b448e6c995c32e3d45, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VideoStreamController
+  webrtcReceiver: {fileID: 769018675}
+  connectionTimeout: 15
+  verboseLogging: 1
 --- !u!1 &770212122
 GameObject:
   m_ObjectHideFlags: 0
@@ -39460,7 +39498,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1486471833}
   m_Direction: 2
   m_Value: 1
-  m_Size: 0.99974394
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -40137,7 +40175,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 33b3af2e400a7704daed134d802d6230, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DroneNetworkClient
-  serverUrl: ws://10.20.229.91:5102
+  serverUrl: ws://192.168.1.231:8083
   droneID: 0
   autoReconnect: 1
 --- !u!328 &1957692440
