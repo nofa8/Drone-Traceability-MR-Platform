@@ -11,25 +11,30 @@ using Unity.WebRTC;
 
 /// <summary>
 /// WebRTC Receiver - Simplified WHEP client based on MediaMTX official example.
-/// Removes trickle ICE complexity in favor of simpler, more reliable connection.
+/// Implements INetworkReconfigurable for runtime IP changes.
 /// </summary>
-public class WebRTCVideoReceiver : MonoBehaviour
+public class WebRTCVideoReceiver : MonoBehaviour, INetworkReconfigurable
 {
     public static WebRTCVideoReceiver Instance;
 
-    [Header("Server Configuration")]
-    public string serverIP = "192.168.1.100";
-    public int webrtcPort = 8889;
+    [Header("Path Configuration")]
     public string whepPathFormat = "{0}/whep";
 
     [Header("Connection Settings")]
-    public float connectionTimeout = 15f;
+    public float connectionTimeout = 60f;
 
     [Header("Output")]
     public RawImage targetDisplay;
 
     [Header("Debug")]
     public bool verboseLogging = true;
+
+    // INetworkReconfigurable
+    public string ServiceName => "WebRTC Video";
+
+    // Runtime config (loaded from NetworkConfig)
+    private string ServerIP => NetworkConfig.Instance.WebRTCServerIP;
+    private int WebRTCPort => NetworkConfig.Instance.WebRTCPort;
 
     // Events
     public event Action<Texture> OnVideoReceived;
@@ -52,11 +57,30 @@ public class WebRTCVideoReceiver : MonoBehaviour
     {
         if (Instance != null && Instance != this) Destroy(gameObject);
         else Instance = this;
+        
+        NetworkConfig.RegisterService(this);
     }
 
     void OnDestroy()
     {
+        NetworkConfig.UnregisterService(this);
         Stop();
+    }
+
+    /// <summary>
+    /// INetworkReconfigurable: Called when user changes network settings.
+    /// </summary>
+    public void OnNetworkConfigChanged()
+    {
+        Log($"Config changed, new endpoint: {ServerIP}:{WebRTCPort}");
+        
+        // If currently streaming, restart with new config
+        if (!string.IsNullOrEmpty(currentDroneId) && CurrentState != ConnectionState.Disconnected)
+        {
+            string droneId = currentDroneId;
+            Stop();
+            Play(droneId);
+        }
     }
 
     public void Play(string droneId)
@@ -94,7 +118,7 @@ public class WebRTCVideoReceiver : MonoBehaviour
         SetState(ConnectionState.Connecting);
         frameCount = 0;
 
-        string endpoint = $"http://{serverIP}:{webrtcPort}/{string.Format(whepPathFormat, currentDroneId)}";
+        string endpoint = $"http://{ServerIP}:{WebRTCPort}/{string.Format(whepPathFormat, currentDroneId)}";
         Log($"🔌 Connecting to: {endpoint}");
 
         // Create peer connection (no ICE servers needed for local/simple setups)
@@ -149,7 +173,7 @@ public class WebRTCVideoReceiver : MonoBehaviour
         req.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(offer.sdp));
         req.downloadHandler = new DownloadHandlerBuffer();
         req.SetRequestHeader("Content-Type", "application/sdp");
-        req.timeout = 10;
+        req.timeout = 60;
 
         yield return req.SendWebRequest();
         if (req.result != UnityWebRequest.Result.Success)
@@ -174,7 +198,7 @@ public class WebRTCVideoReceiver : MonoBehaviour
         Log("✅ Remote description set, waiting for ICE...");
 
         // Wait for connection with timeout
-        float elapsed = 0f;
+        float elapsed = 0f; 
         while (CurrentState == ConnectionState.Connecting && elapsed < connectionTimeout)
         {
             elapsed += Time.deltaTime;

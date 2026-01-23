@@ -5,17 +5,22 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
-public class DroneNetworkClient : MonoBehaviour
+public class DroneNetworkClient : MonoBehaviour, INetworkReconfigurable
 {
     // --- NEW EVENT ---
     // The Map listens to this to draw ALL drones at once
     public static event Action<DroneTelemetryData> OnGlobalTelemetry;
 
     [Header("Connection Settings")]
-    [Tooltip("Use PC IP (e.g. 192.168.1.5) if on Quest")]
-    public string serverUrl = "ws://192.168.1.64:5102"; 
+    [Tooltip("Drone ID to subscribe to")]
     public string droneID = "RD001";
     public bool autoReconnect = true;
+
+    // INetworkReconfigurable
+    public string ServiceName => "WebSocket Telemetry";
+
+    // Runtime URL (loaded from NetworkConfig)
+    private string ServerUrl => NetworkConfig.Instance.WebSocketUrl;
 
     private ClientWebSocket ws;
     private CancellationTokenSource cts;
@@ -23,6 +28,7 @@ public class DroneNetworkClient : MonoBehaviour
 
     async void Start()
     {
+        NetworkConfig.RegisterService(this);
         await Task.Delay(500); 
         await ConnectWithRetry();
     }
@@ -41,7 +47,8 @@ public class DroneNetworkClient : MonoBehaviour
                 ws = new ClientWebSocket();
                 cts = new CancellationTokenSource();
 
-                Uri uri = new Uri($"{serverUrl}?dboidsID={droneID}");
+                Debug.Log($"⏳ Connecting to {ServerUrl}?dboidsID={droneID}");
+                Uri uri = new Uri($"{ServerUrl}?dboidsID={droneID}");
 
                 // Debug.Log($"⏳ Connecting to {uri}...");
                 await ws.ConnectAsync(uri, cts.Token);
@@ -222,8 +229,22 @@ public class DroneNetworkClient : MonoBehaviour
 
     private void OnDestroy()
     {
+        NetworkConfig.UnregisterService(this);
         cts?.Cancel();
         ws?.Dispose();
+    }
+
+    /// <summary>
+    /// INetworkReconfigurable: Called when user changes network settings.
+    /// </summary>
+    public void OnNetworkConfigChanged()
+    {
+        Debug.Log($"[WebSocket] Config changed, reconnecting to {ServerUrl}...");
+        cts?.Cancel();
+        ws?.Dispose();
+        ws = null;
+        isReconnecting = true;
+        _ = ConnectWithRetry();
     }
 
     public static void SendMockTelemetry(DroneTelemetryData data)

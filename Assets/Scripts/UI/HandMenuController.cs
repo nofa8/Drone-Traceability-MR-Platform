@@ -19,7 +19,11 @@ public class HandMenuController : MonoBehaviour
 
     [Header("Settings")]
     public float openThreshold = 0.80f; 
-    public float closeThreshold = 0.55f; 
+    public float closeThreshold = 0.55f;
+    
+    [Header("Settings Panel")]
+    public Button settingsBtn;
+    public GameObject settingsPanel; 
 
     void Start()
     {
@@ -56,6 +60,13 @@ public class HandMenuController : MonoBehaviour
         // Init UI
         UpdateSlotButtons();
         if (SelectionManager.Instance != null) UpdateUI(SelectionManager.Instance.ActiveSlotId);
+
+        // 5. Wire up "Settings" Button
+        if (settingsBtn && settingsPanel)
+        {
+            settingsPanel.SetActive(false); // Start hidden
+            settingsBtn.onClick.AddListener(OnSettingsClicked);
+        }
     }
 
     void OnDestroy()
@@ -82,6 +93,12 @@ public class HandMenuController : MonoBehaviour
             FleetUIManager.Instance.ShowFleetView();
         else
             FleetUIManager.Instance.ShowDroneDetail();
+    }
+
+    void OnSettingsClicked()
+    {
+        if (settingsPanel)
+            settingsPanel.SetActive(!settingsPanel.activeSelf);
     }
 
     void UpdateSlotButtons()
